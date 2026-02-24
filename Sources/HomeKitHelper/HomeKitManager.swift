@@ -539,6 +539,13 @@ extension HomeKitManager: HMHomeManagerDelegate {
                 "HomeKit updated: \(manager.homes.count) home(s), \(self.totalAccessoryCount) accessory(ies)"
             )
 
+            // Register as delegate for every accessory so we receive real-time value changes
+            for home in manager.homes {
+                for accessory in home.accessories {
+                    accessory.delegate = self
+                }
+            }
+
             if !homesReady {
                 homesReady = true
                 for continuation in pendingContinuations {
@@ -549,6 +556,38 @@ extension HomeKitManager: HMHomeManagerDelegate {
 
             // Warm cache after initial load and device set changes
             Task { await self.warmCache() }
+        }
+    }
+}
+
+// MARK: - HMAccessoryDelegate
+
+extension HomeKitManager: HMAccessoryDelegate {
+    /// Called when any characteristic value changes (e.g. a light turned off via the Home app).
+    /// Updates the cache immediately so the next MCP/CLI query returns fresh state.
+    nonisolated func accessory(
+        _ accessory: HMAccessory,
+        service: HMService,
+        didUpdateValueFor characteristic: HMCharacteristic
+    ) {
+        Task { @MainActor in
+            let name = CharacteristicMapper.name(for: characteristic.characteristicType)
+            guard AccessoryModel.isInterestingState(name) else { return }
+
+            let accessoryID = accessory.uniqueIdentifier.uuidString
+            let value = CharacteristicMapper.formatValue(
+                characteristic.value, for: characteristic.characteristicType
+            )
+
+            // Update the single value in the cache
+            var state = cache.cachedState(for: accessoryID) ?? [:]
+            state[name] = value
+            cache.setValues(for: accessoryID, state: state)
+            cache.save()
+
+            HelperLogger.homekit.debug(
+                "Live update: \(accessory.name).\(name) = \(value)"
+            )
         }
     }
 }

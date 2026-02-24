@@ -3,19 +3,35 @@ import SwiftUI
 struct IntegrationsSettingsView: View {
     @AppStorage(AppConfig.portKey) private var port = AppConfig.defaultPort
 
-    @State private var claudeDesktopStatus: IntegrationStatus = .checking
-    @State private var claudeCodeStatus: IntegrationStatus = .checking
+    @State private var claudeDesktopStatus: DesktopStatus = .checking
+    @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
     @State private var statusMessage: StatusMessage?
 
-    private enum IntegrationStatus {
+    // MARK: - Status Enums
+
+    private enum DesktopStatus {
         case checking
         case notInstalled
         case installed
-        case tokenMismatch
         case nodeNotFound
     }
 
+    private enum ClaudeCodeStatus {
+        /// Still checking config files.
+        case checking
+        /// Plugin detected in ~/.claude/settings.json enabledPlugins.
+        case pluginInstalled
+        /// Legacy HTTP MCP config in ~/.claude.json (works, but plugin preferred).
+        case mcpConfigured
+        /// Neither plugin nor MCP config found.
+        case notInstalled
+    }
+
+    // MARK: - Constants & Paths
+
     private static let serverName = "homekit-bridge"
+    private static let pluginPrefix = "homekit-bridge@"
+    private static let githubRepo = "omarshahine/HomeClaw"
 
     private static var claudeDesktopConfigPath: String {
         FileManager.default.homeDirectoryForCurrentUser.path
@@ -26,85 +42,22 @@ struct IntegrationsSettingsView: View {
         FileManager.default.homeDirectoryForCurrentUser.path + "/.claude.json"
     }
 
+    private static var claudeCodeSettingsPath: String {
+        FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/settings.json"
+    }
+
     /// Path to the bundled mcp-server.js inside the app's Resources.
     private static var bundledServerJSPath: String? {
         let path = Bundle.main.bundlePath + "/Contents/Resources/mcp-server.js"
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
+    // MARK: - Body
+
     var body: some View {
         Form {
-            Section("Claude Desktop") {
-                LabeledContent("Status") {
-                    statusLabel(claudeDesktopStatus)
-                }
-
-                if let path = Self.bundledServerJSPath {
-                    LabeledContent("MCP Server") {
-                        Text(path)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-
-                HStack {
-                    Button(claudeDesktopStatus == .installed ? "Reinstall" : "Install") {
-                        installClaudeDesktop()
-                    }
-                    .disabled(claudeDesktopStatus == .nodeNotFound)
-
-                    if canRemove(claudeDesktopStatus) {
-                        Button("Remove", role: .destructive) {
-                            remove(from: Self.claudeDesktopConfigPath)
-                            claudeDesktopStatus = .notInstalled
-                        }
-                    }
-                }
-
-                if claudeDesktopStatus == .nodeNotFound {
-                    Text("Node.js is required for Claude Desktop integration. Install from nodejs.org.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else if Self.bundledServerJSPath == nil {
-                    Text("MCP server not bundled. Rebuild with: npm run build:mcp && scripts/build.sh")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("Uses the bundled stdio MCP server. Requires Node.js.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Claude Code") {
-                LabeledContent("Status") {
-                    statusLabel(claudeCodeStatus)
-                }
-
-                LabeledContent("Endpoint") {
-                    Text("http://localhost:\(port)\(AppConfig.mcpEndpoint)")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-
-                HStack {
-                    Button(installButtonLabel(claudeCodeStatus)) {
-                        installClaudeCode()
-                    }
-
-                    if canRemove(claudeCodeStatus) {
-                        Button("Remove", role: .destructive) {
-                            remove(from: Self.claudeCodeConfigPath)
-                            claudeCodeStatus = .notInstalled
-                        }
-                    }
-                }
-
-                Text("Connects to the HTTP MCP server with bearer token authentication.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            claudeDesktopSection
+            claudeCodeSection
 
             if let message = statusMessage {
                 Section {
@@ -132,11 +85,127 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    // MARK: - Status Display
+    // MARK: - Claude Desktop Section
 
     @ViewBuilder
-    private func statusLabel(_ status: IntegrationStatus) -> some View {
-        switch status {
+    private var claudeDesktopSection: some View {
+        Section("Claude Desktop") {
+            LabeledContent("Status") {
+                desktopStatusLabel
+            }
+
+            if let path = Self.bundledServerJSPath {
+                LabeledContent("MCP Server") {
+                    Text(path)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            HStack {
+                Button(claudeDesktopStatus == .installed ? "Reinstall" : "Install") {
+                    installClaudeDesktop()
+                }
+                .disabled(claudeDesktopStatus == .nodeNotFound)
+
+                if claudeDesktopStatus == .installed {
+                    Button("Remove", role: .destructive) {
+                        remove(from: Self.claudeDesktopConfigPath)
+                        claudeDesktopStatus = .notInstalled
+                    }
+                }
+            }
+
+            if claudeDesktopStatus == .nodeNotFound {
+                Text("Node.js is required for Claude Desktop integration. Install from nodejs.org.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if Self.bundledServerJSPath == nil {
+                Text("MCP server not bundled. Rebuild with: npm run build:mcp && scripts/build.sh")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Uses the bundled stdio MCP server. Requires Node.js.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Claude Code Section
+
+    @ViewBuilder
+    private var claudeCodeSection: some View {
+        Section("Claude Code") {
+            LabeledContent("Status") {
+                claudeCodeStatusLabel
+            }
+
+            switch claudeCodeStatus {
+            case .pluginInstalled:
+                Text("HomeKit Bridge plugin is installed and active.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+            case .mcpConfigured:
+                LabeledContent("Endpoint") {
+                    Text("http://localhost:\(port)\(AppConfig.mcpEndpoint)")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+
+                HStack {
+                    Button("Copy Plugin Install Commands") {
+                        copyInstallCommands()
+                    }
+                    Button("Remove MCP Config", role: .destructive) {
+                        remove(from: Self.claudeCodeConfigPath)
+                        claudeCodeStatus = .notInstalled
+                    }
+                }
+
+                Text(
+                    "HTTP MCP config detected in ~/.claude.json. Consider switching to the plugin for easier updates."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+            case .notInstalled:
+                Button("Copy Install Commands") {
+                    copyInstallCommands()
+                }
+
+                installInstructionsView
+
+            case .checking:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var installInstructionsView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Run these commands in Claude Code:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("/plugin marketplace add \(Self.githubRepo)")
+                Text("/plugin install homekit-bridge@homekit-bridge")
+            }
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+
+    // MARK: - Status Labels
+
+    @ViewBuilder
+    private var desktopStatusLabel: some View {
+        switch claudeDesktopStatus {
         case .checking:
             Label("Checking\u{2026}", systemImage: "circle.dotted")
                 .foregroundStyle(.secondary)
@@ -146,25 +215,28 @@ struct IntegrationsSettingsView: View {
         case .installed:
             Label("Installed", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .tokenMismatch:
-            Label("Token Outdated", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
         case .nodeNotFound:
             Label("Node.js Not Found", systemImage: "xmark.circle")
                 .foregroundStyle(.red)
         }
     }
 
-    private func installButtonLabel(_ status: IntegrationStatus) -> String {
-        switch status {
-        case .tokenMismatch: "Update"
-        case .installed: "Reinstall"
-        default: "Install"
+    @ViewBuilder
+    private var claudeCodeStatusLabel: some View {
+        switch claudeCodeStatus {
+        case .checking:
+            Label("Checking\u{2026}", systemImage: "circle.dotted")
+                .foregroundStyle(.secondary)
+        case .pluginInstalled:
+            Label("Plugin Installed", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .mcpConfigured:
+            Label("MCP Config", systemImage: "checkmark.circle")
+                .foregroundStyle(.green)
+        case .notInstalled:
+            Label("Not Installed", systemImage: "circle")
+                .foregroundStyle(.secondary)
         }
-    }
-
-    private func canRemove(_ status: IntegrationStatus) -> Bool {
-        status == .installed || status == .tokenMismatch
     }
 
     // MARK: - Status Checking
@@ -174,8 +246,7 @@ struct IntegrationsSettingsView: View {
         claudeCodeStatus = checkClaudeCodeStatus()
     }
 
-    private func checkClaudeDesktopStatus() -> IntegrationStatus {
-        // Check Node.js availability first
+    private func checkClaudeDesktopStatus() -> DesktopStatus {
         guard nodeJSPath() != nil else { return .nodeNotFound }
 
         guard let config = readConfig(at: Self.claudeDesktopConfigPath),
@@ -187,34 +258,33 @@ struct IntegrationsSettingsView: View {
         return .installed
     }
 
-    private func checkClaudeCodeStatus() -> IntegrationStatus {
+    private func checkClaudeCodeStatus() -> ClaudeCodeStatus {
+        // Check for plugin first (preferred approach)
+        if isPluginEnabled() { return .pluginInstalled }
+
+        // Check for legacy HTTP MCP config in ~/.claude.json
+        if isMCPConfigured() { return .mcpConfigured }
+
+        return .notInstalled
+    }
+
+    /// Checks ~/.claude/settings.json enabledPlugins for any key matching "homekit-bridge@*".
+    private func isPluginEnabled() -> Bool {
+        guard let config = readConfig(at: Self.claudeCodeSettingsPath),
+            let enabled = config["enabledPlugins"] as? [String: Any]
+        else { return false }
+        return enabled.keys.contains { $0.hasPrefix(Self.pluginPrefix) }
+    }
+
+    /// Checks ~/.claude.json mcpServers for a "homekit-bridge" entry.
+    private func isMCPConfigured() -> Bool {
         guard let config = readConfig(at: Self.claudeCodeConfigPath),
-            let servers = config["mcpServers"] as? [String: Any],
-            servers[Self.serverName] != nil
-        else {
-            return .notInstalled
-        }
-
-        if let currentToken = currentToken(),
-            let configToken = extractBearerToken(from: config)
-        {
-            return configToken == currentToken ? .installed : .tokenMismatch
-        }
-
-        return .installed
+            let servers = config["mcpServers"] as? [String: Any]
+        else { return false }
+        return servers[Self.serverName] != nil
     }
 
-    private func extractBearerToken(from config: [String: Any]) -> String? {
-        guard let servers = config["mcpServers"] as? [String: Any],
-            let entry = servers[Self.serverName] as? [String: Any],
-            let headers = entry["headers"] as? [String: Any],
-            let auth = headers["Authorization"] as? String,
-            auth.hasPrefix("Bearer ")
-        else { return nil }
-        return String(auth.dropFirst("Bearer ".count))
-    }
-
-    // MARK: - Install
+    // MARK: - Install Actions
 
     private func installClaudeDesktop() {
         guard let serverJS = Self.bundledServerJSPath else {
@@ -244,28 +314,14 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    private func installClaudeCode() {
-        guard let token = currentToken() else {
-            showStatus("No bearer token found in Keychain", isError: true)
-            return
-        }
-
-        let entry: [String: Any] = [
-            "type": "http",
-            "url": "http://localhost:\(port)\(AppConfig.mcpEndpoint)",
-            "headers": ["Authorization": "Bearer \(token)"],
-        ]
-
-        do {
-            try upsertMCPServer(entry: entry, in: Self.claudeCodeConfigPath)
-            claudeCodeStatus = .installed
-            showStatus("Claude Code integration installed", isError: false)
-            AppLogger.app.info("Installed MCP config for Claude Code")
-        } catch {
-            showStatus("Failed: \(error.localizedDescription)", isError: true)
-            AppLogger.app.error(
-                "Failed to install Claude Code config: \(error.localizedDescription)")
-        }
+    private func copyInstallCommands() {
+        let commands = """
+            /plugin marketplace add \(Self.githubRepo)
+            /plugin install homekit-bridge@homekit-bridge
+            """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(commands, forType: .string)
+        showStatus("Install commands copied to clipboard", isError: false)
     }
 
     // MARK: - Remove

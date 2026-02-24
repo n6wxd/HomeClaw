@@ -9,7 +9,7 @@ import Foundation
 final class CharacteristicCache: @unchecked Sendable {
     static let shared = CharacteristicCache()
 
-    private static let ttlSeconds: TimeInterval = 300 // 5 minutes
+    private static let ttlSeconds: TimeInterval = 60 // 1 minute
 
     private let configDir: URL
     private let cacheFile: URL
