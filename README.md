@@ -72,7 +72,7 @@ Launch from `/Applications` or: `open "/Applications/HomeKit Bridge.app"`
 
 On first launch, grant HomeKit access when prompted. The menu bar icon appears -- click it to see your connected homes.
 
-> **Note:** Apple restricts the HomeKit entitlement to development signing and App Store distribution. The `--notarize` flag produces a Developer ID build where HomeKit access is non-functional. For full HomeKit support, use the default development build.
+> **Note:** Apple restricts the HomeKit entitlement to development signing and App Store distribution. Developer ID builds cannot access HomeKit. See [Why Development Signing?](#why-development-signing) for details.
 
 ## MCP Tools
 
@@ -385,24 +385,25 @@ scripts/build.sh --debug
 # Skip HomeKitHelper for fast SPM-only iteration
 scripts/build.sh --debug --skip-helper
 
-# Full build with Apple notarization (HomeKit won't work — see note below)
-scripts/build.sh --notarize --install
-
 # Clean build artifacts first
 scripts/build.sh --clean
 ```
 
-The build script handles: SPM compilation, Catalyst xcodebuild with automatic signing, app bundle assembly, code signing, optional notarization, and install.
+The build script handles: SPM compilation, Catalyst xcodebuild with automatic signing, app bundle assembly, code signing, and install.
 
 ### Version Bumping
 
-All version sources are updated with a single command:
+Version is derived from git tags at build time. To release a new version:
 
 ```bash
-scripts/bump-version.sh 0.2.0
+scripts/bump-version.sh 0.2.0   # Updates source files + prints tag commands
+npm run build:mcp                # Rebuild MCP server with new version
+git add -A && git commit -m "Bump version to 0.2.0"
+git tag -a v0.2.0 -m "HomeKit Bridge v0.2.0"
+git push && git push origin v0.2.0
 ```
 
-This updates `AppConfig.swift`, both Info.plists, all `package.json` files, the Claude plugin manifest, and the marketplace metadata.
+The build script reads the latest `v*` tag for the marketing version and uses commit count as the build number.
 
 ### Installing on Additional Macs
 
@@ -429,9 +430,9 @@ Development-signed builds are tied to registered devices. To run HomeClaw on ano
 
 > **Note:** The target Mac must be signed into iCloud with an account that has HomeKit home data. HomeKit homes are tied to iCloud accounts, not to the app.
 
-### Why Not Notarize?
+### Why Development Signing?
 
-Apple restricts the `com.apple.developer.homekit` entitlement to **development signing** and **Mac App Store** distribution. It cannot be included in Developer ID provisioning profiles. The `--notarize` flag produces a build that passes Gatekeeper but has no HomeKit access (`HMHomeManager` returns zero homes). This is an [Apple platform restriction](https://developer.apple.com/forums/thread/699085), not a bug.
+Apple restricts the `com.apple.developer.homekit` entitlement to **development signing** and **Mac App Store** distribution. It cannot be included in Developer ID provisioning profiles. A Developer ID build would pass Gatekeeper but have no HomeKit access (`HMHomeManager` returns zero homes). This is an [Apple platform restriction](https://developer.apple.com/forums/thread/699085), not a bug.
 
 ## Project Structure
 
@@ -453,7 +454,7 @@ Sources/
     AccessoryModel.swift       JSON serialization models
 Resources/                 Info.plist, entitlements, app icons
 scripts/
-  build.sh                 Build, sign, notarize, and install
+  build.sh                 Build, sign, and install
   bump-version.sh          Update version across all 9 files
 mcp-server/                Node.js stdio MCP server (wraps homekit-cli)
 openclaw/                  Claude Code plugin (HomeClaw)
@@ -553,7 +554,7 @@ The helper is running but can't see any HomeKit data. Check in order:
    ```
    You should see `com.apple.developer.homekit` → `true`.
 3. **TCC permission granted?** On first launch, macOS asks for HomeKit access. If you denied it, re-grant in System Settings > Privacy & Security > HomeKit.
-4. **Built with `--notarize`?** Notarized builds strip the HomeKit entitlement (Apple restriction). Use the default development build instead.
+4. **Using Developer ID signing?** Only development signing supports the HomeKit entitlement. See [Why Development Signing?](#why-development-signing).
 
 ### How do I install on another Mac?
 

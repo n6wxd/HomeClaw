@@ -61,7 +61,6 @@ scripts/build.sh --release --install   # Full build + install to /Applications
 scripts/build.sh --debug               # Debug build only
 scripts/build.sh --skip-helper         # Skip Catalyst build (faster iteration)
 scripts/build.sh --team-id ABCDE12345  # Use a different Apple Developer team
-scripts/build.sh --notarize --install  # Developer ID + notarize (HomeKit won't work)
 npm run build:mcp                      # Build Node.js MCP server only
 ```
 
@@ -99,8 +98,8 @@ curl -X POST http://localhost:9090/mcp \
 Apple restricts `com.apple.developer.homekit` to App Store distribution. It **cannot** be included in Developer ID provisioning profiles. This means:
 
 - **Development signing** (`Apple Development`): Works. Xcode automatic signing creates a provisioning profile with HomeKit.
-- **Developer ID / notarize**: HomeKit entitlement is stripped. The app launches but `HMHomeManager` returns zero homes.
 - **Mac App Store**: Would work, but requires App Store review.
+- **Developer ID**: Not supported. HomeKit entitlement cannot be included in Developer ID provisioning profiles.
 
 Reference: [Apple DTS confirmation](https://developer.apple.com/forums/thread/699085) — "The HomeKit entitlement is only available for App Store apps on macOS."
 
@@ -116,11 +115,9 @@ The HomeKit entitlement **must** be in `Sources/HomeKitHelper/HomeKitHelper.enti
 
 ### How the build script handles signing
 
-**Development builds** (default): The build script does **not** re-sign HomeKitHelper. Xcode automatic signing produces a correctly signed helper with the HomeKit entitlement, identity keys, and embedded provisioning profile. Re-signing would strip these.
+The build script does **not** re-sign HomeKitHelper. Xcode automatic signing produces a correctly signed helper with the HomeKit entitlement, identity keys, and embedded provisioning profile. Re-signing would strip these.
 
-**Notarize builds** (`--notarize`): The helper is re-signed with Developer ID. The HomeKit entitlement is removed (Apple rejects it for Developer ID). A warning is printed. The helper will launch but HomeKit access will not work.
-
-**Do NOT re-sign the helper for development builds.** Xcode embeds identity entitlements (`application-identifier`, `com.apple.developer.team-identifier`) from the provisioning profile. Plain `codesign --entitlements FILE` does a full replacement — signing with just the HomeKit key strips identity keys, causing launchd error 163.
+**Do NOT re-sign the helper.** Xcode embeds identity entitlements (`application-identifier`, `com.apple.developer.team-identifier`) from the provisioning profile. Plain `codesign --entitlements FILE` does a full replacement — signing with just the HomeKit key strips identity keys, causing launchd error 163.
 
 Verify with: `codesign -d --entitlements :- "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"`
 
