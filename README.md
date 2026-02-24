@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/homeclaw-icon.png" width="200" alt="HomeClaw icon"></p>
+
 # HomeClaw
 
 Control your Apple HomeKit smart home from AI assistants, the terminal, and automation tools.
