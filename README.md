@@ -97,13 +97,13 @@ Any MCP-compatible client can connect. The **stdio server** wraps `homekit-cli` 
   "mcpServers": {
     "homekit-bridge": {
       "command": "node",
-      "args": ["/path/to/HomeClaw/mcp-server/dist/server.js"]
+      "args": ["/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"]
     }
   }
 }
 ```
 
-Build the stdio server first with `npm run build:mcp`.
+The `mcp-server.js` is bundled inside the app. You can also use the Integrations tab in Settings to install this automatically.
 
 Alternatively, connect directly to the **HTTP MCP server** at `http://localhost:9090/mcp` with a bearer token. See [Using with Claude Code](#using-with-claude-code) for Claude-specific setup, or test with curl:
 
@@ -160,14 +160,7 @@ HomeClaw integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ### Option 1: MCP Server (Recommended)
 
-HomeClaw includes a Node.js stdio MCP server that wraps `homekit-cli`. It requires the HomeKit Bridge app to be running (for the Unix socket) but needs no authentication -- perfect for local use.
-
-**Build the server first:**
-
-```bash
-cd ~/GitHub/HomeClaw
-npm install && npm run build:mcp
-```
+HomeClaw includes a Node.js stdio MCP server bundled inside the app. It wraps `homekit-cli`, requires the HomeKit Bridge app to be running (for the Unix socket), and needs no authentication -- perfect for local use.
 
 **Add to Claude Code** by adding the following to your MCP configuration file (`~/.claude.json` for user-scope, or `.mcp.json` in a project):
 
@@ -176,18 +169,16 @@ npm install && npm run build:mcp
   "mcpServers": {
     "homekit-bridge": {
       "command": "node",
-      "args": ["/Users/YOU/GitHub/HomeClaw/mcp-server/dist/server.js"]
+      "args": ["/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"]
     }
   }
 }
 ```
 
-Replace `/Users/YOU/GitHub/HomeClaw` with the actual path to your clone.
-
 Or add it via the CLI:
 
 ```bash
-claude mcp add --scope user homekit-bridge -- node ~/GitHub/HomeClaw/mcp-server/dist/server.js
+claude mcp add --scope user homekit-bridge -- node "/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"
 ```
 
 Restart Claude Code and the HomeKit tools are available.
