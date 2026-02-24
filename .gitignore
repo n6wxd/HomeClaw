@@ -11,5 +11,8 @@ DerivedData/
 *.xcodeproj
 *.xcworkspace
 
+# Local configuration (contains developer Team ID)
+.env.local
+
 # Node.js
 node_modules/

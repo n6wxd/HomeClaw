@@ -10,7 +10,13 @@ APP_NAME="HomeKit Bridge"
 BUNDLE_DIR="$PROJECT_ROOT/.build/app"
 APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
 HELPER_PROJECT="$PROJECT_ROOT/Sources/HomeKitHelper"
-TEAM_ID="YOUR_TEAM_ID"
+
+# Load local configuration (Team ID, etc.)
+if [[ -f "$PROJECT_ROOT/.env.local" ]]; then
+    # shellcheck source=/dev/null
+    source "$PROJECT_ROOT/.env.local"
+fi
+TEAM_ID="${HOMEKIT_TEAM_ID:-}"
 
 # Notarization credentials (App Store Connect API key)
 NOTARY_KEY="$HOME/.private_keys/AuthKey_REDACTED_KEY_ID.p8"
@@ -56,7 +62,11 @@ Options:
   --notarize      Sign with Developer ID, submit to Apple notary, and staple
   --clean         Clean build artifacts first
   --skip-helper   Skip building HomeKitHelper (faster iteration)
+  --team-id ID    Apple Developer Team ID (required, or set HOMEKIT_TEAM_ID)
   --help          Show this help
+
+Environment:
+  HOMEKIT_TEAM_ID   Same as --team-id (flag takes precedence)
 EOF
     exit 0
 }
@@ -71,10 +81,20 @@ while [[ $# -gt 0 ]]; do
         --notarize)     DO_NOTARIZE=true; BUILD_CONFIG="release"; shift ;;
         --clean)        DO_CLEAN=true; shift ;;
         --skip-helper)  SKIP_HELPER=true; shift ;;
+        --team-id)      TEAM_ID="$2"; shift 2 ;;
         --help|-h)      usage ;;
         *)              echo "Unknown option: $1"; usage ;;
     esac
 done
+
+# ─── Resolve team ID ───────────────────────────────────────────────
+
+if [[ -z "$TEAM_ID" || "$TEAM_ID" == "YOUR_TEAM_ID" ]]; then
+    echo "Error: No Apple Developer Team ID specified." >&2
+    echo "  Use --team-id YOUR_ID or set HOMEKIT_TEAM_ID in your environment." >&2
+    echo "  Find your Team ID at https://developer.apple.com/account#MembershipDetailsCard" >&2
+    exit 1
+fi
 
 # ─── Derived paths ──────────────────────────────────────────────────
 
@@ -184,6 +204,8 @@ if ! $SKIP_HELPER; then
         -configuration "$XCODE_CONFIG" \
         -destination 'platform=macOS,variant=Mac Catalyst' \
         -derivedDataPath "$DERIVED_DATA" \
+        -allowProvisioningUpdates \
+        DEVELOPMENT_TEAM="$TEAM_ID" \
         ONLY_ACTIVE_ARCH=NO \
         -quiet 2>/dev/null; then
         step_done
@@ -219,6 +241,16 @@ cp "$SPM_BUILD_DIR/homekit-mcp" "$APP_BUNDLE/Contents/MacOS/homekit-mcp"
 if ! $SKIP_HELPER; then
     if [[ -d "$CATALYST_PRODUCTS/HomeKitHelper.app" ]]; then
         cp -R "$CATALYST_PRODUCTS/HomeKitHelper.app" "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app"
+
+        # IMPORTANT: Do NOT modify the helper's provisioning profile or re-sign it
+        # for development builds. Xcode automatic signing embeds a development
+        # provisioning profile that includes the HomeKit entitlement. Re-signing
+        # or replacing this profile breaks HomeKit access.
+        #
+        # Apple restricts com.apple.developer.homekit to App Store distribution
+        # only — it CANNOT be included in Developer ID provisioning profiles.
+        # See: https://developer.apple.com/forums/thread/699085
+        :  # no-op; Xcode's signing is preserved as-is
     else
         step_fail "HomeKitHelper.app not found at $CATALYST_PRODUCTS/HomeKitHelper.app"
     fi
@@ -243,10 +275,46 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
         CODESIGN_FLAGS+=(--options runtime --timestamp)
     fi
 
+    # HomeKitHelper: Do NOT re-sign for development builds.
+    # Xcode automatic signing produces a correctly signed helper with:
+    #   - HomeKit entitlement + matching provisioning profile
+    #   - application-identifier and team-identifier
+    # Re-signing would strip the provisioning profile or entitlements.
+    #
+    # For --notarize builds, the helper must be re-signed with Developer ID,
+    # but note: HomeKit will NOT work (Apple restricts the entitlement to
+    # App Store distribution). The helper is included for completeness but
+    # HMHomeManager will return zero homes on non-developer machines.
     if ! $SKIP_HELPER && [[ -d "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" ]]; then
-        codesign "${CODESIGN_FLAGS[@]}" --deep \
-            --entitlements "$HELPER_ENTITLEMENTS" \
-            "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" 2>/dev/null
+        if $DO_NOTARIZE; then
+            echo ""
+            echo "  ⚠ Warning: HomeKit entitlement is not available for Developer ID distribution."
+            echo "    The helper will launch but HMHomeManager will not discover homes."
+            echo "    For full HomeKit support, use development signing or Mac App Store."
+            echo ""
+
+            # Re-sign for notarization (Developer ID + hardened runtime).
+            # Extract Xcode's entitlements and strip development-only keys.
+            EXTRACTED_ENTITLEMENTS="$BUNDLE_DIR/helper-entitlements.plist"
+            codesign -d --entitlements :"$EXTRACTED_ENTITLEMENTS" \
+                "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" 2>/dev/null
+
+            if [[ -f "$EXTRACTED_ENTITLEMENTS" ]]; then
+                /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "$EXTRACTED_ENTITLEMENTS" 2>/dev/null || true
+                # Remove HomeKit entitlement — it can't be validated without an
+                # App Store provisioning profile and causes AMFI rejection.
+                /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.homekit" "$EXTRACTED_ENTITLEMENTS" 2>/dev/null || true
+
+                codesign "${CODESIGN_FLAGS[@]}" --deep \
+                    --entitlements "$EXTRACTED_ENTITLEMENTS" \
+                    "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" 2>/dev/null
+
+                rm -f "$EXTRACTED_ENTITLEMENTS"
+            fi
+            # Remove the development provisioning profile (mismatches Developer ID)
+            rm -f "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app/Contents/embedded.provisionprofile"
+        fi
+        # For non-notarize builds: Xcode's signing is preserved — no re-signing needed.
     fi
 
     codesign "${CODESIGN_FLAGS[@]}" \

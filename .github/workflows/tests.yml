@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  swift-build:
-    name: Swift Build
+  build:
+    name: Build
     runs-on: macos-26
     steps:
       - name: Checkout
@@ -26,13 +26,6 @@ jobs:
 
       - name: Build homekit-cli
         run: swift build --product homekit-cli
-
-  mcp-server-build:
-    name: MCP Server (Node)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
