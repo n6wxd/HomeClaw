@@ -1,0 +1,15 @@
+{
+  "name": "@homekit-bridge/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for HomeKit Bridge",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

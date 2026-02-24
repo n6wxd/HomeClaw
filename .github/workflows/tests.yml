@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  swift-build:
+    name: Swift Build
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify HomeKit entitlement
+        run: |
+          if ! grep -q 'com.apple.developer.homekit' Sources/HomeKitHelper/HomeKitHelper.entitlements; then
+            echo "::error::HomeKit entitlement missing from HomeKitHelper.entitlements — readValue() will silently fail"
+            exit 1
+          fi
+
+      - name: Build homekit-mcp
+        run: swift build --product homekit-mcp
+
+      - name: Build homekit-cli
+        run: swift build --product homekit-cli
+
+  mcp-server-build:
+    name: MCP Server (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build MCP server
+        run: npm run build:mcp

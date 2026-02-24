@@ -1,0 +1,16 @@
+{
+  "name": "homekit-bridge",
+  "owner": {
+    "name": "Omar Shahine"
+  },
+  "plugins": [
+    {
+      "name": "homekit-bridge",
+      "source": "./",
+      "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
+      "version": "0.1.0",
+      "keywords": ["homekit", "smart-home", "lights", "locks", "thermostats", "scenes", "automation"],
+      "category": "iot"
+    }
+  ]
+}

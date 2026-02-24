@@ -1,0 +1,17 @@
+{
+  "id": "homeclaw",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "binDir": {
+        "type": "string",
+        "description": "Path to directory containing the homekit-cli binary"
+      }
+    }
+  },
+  "uiHints": {
+    "binDir": {
+      "label": "CLI Binary Directory"
+    }
+  }
+}

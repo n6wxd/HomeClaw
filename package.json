@@ -1,0 +1,19 @@
+{
+  "name": "homekit-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HomeKit Bridge — MCP server and CLI for HomeKit smart home control",
+  "type": "module",
+  "workspaces": [
+    "openclaw",
+    "mcp-server"
+  ],
+  "scripts": {
+    "build:mcp": "node mcp-server/build.mjs",
+    "build:swift": "swift build",
+    "build": "npm run build:swift && npm run build:mcp"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

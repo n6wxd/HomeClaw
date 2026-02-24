@@ -1,0 +1,15 @@
+.DS_Store
+/.build
+# Includes: .build/app/ (assembled .app bundle), .build/DerivedData/ (xcodebuild)
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/
+.netrc
+
+# Generated Xcode projects (regenerate with: xcodegen generate)
+*.xcodeproj
+*.xcworkspace
+
+# Node.js
+node_modules/

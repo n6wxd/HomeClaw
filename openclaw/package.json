@@ -1,0 +1,41 @@
+{
+  "name": "homeclaw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw plugin for HomeKit smart home control — lights, locks, thermostats, and scenes",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./src/index.ts"]
+  },
+  "files": [
+    "src/",
+    "skills/",
+    "openclaw.plugin.json"
+  ],
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "homekit",
+    "smart-home",
+    "lights",
+    "thermostats",
+    "scenes"
+  ],
+  "author": {
+    "name": "Omar Shahine",
+    "email": "omar@shahine.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/omarshahine/HomeKitBridge.git",
+    "directory": "openclaw"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": ["darwin"],
+  "engines": {
+    "node": ">=18"
+  }
+}
