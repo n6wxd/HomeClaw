@@ -315,7 +315,7 @@ final class HomeKitManager: NSObject, Observable {
                 var dict: [String: Any] = [
                     "id": accessory.uniqueIdentifier.uuidString,
                     "name": accessory.name,
-                    "category": CharacteristicMapper.categoryName(for: accessory.category.categoryType),
+                    "category": CharacteristicMapper.inferredCategoryName(for: accessory),
                     "home_name": home.name,
                     "home_id": home.uniqueIdentifier.uuidString,
                 ]

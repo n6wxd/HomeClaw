@@ -128,7 +128,7 @@ enum CharacteristicMapper {
     ///
     /// Omitted (supplementary/metadata services, not device categories):
     ///   AccessoryInformation, Battery, FilterMaintenance, InputSource, Label,
-    ///   LockManagement, CameraRTPStreamManagement
+    ///   LockManagement
     private static let serviceCategoryMap: [String: String] = [
         // Lighting
         HMServiceTypeLightbulb: "lightbulb",
@@ -161,6 +161,10 @@ enum CharacteristicMapper {
         // Security & cameras
         HMServiceTypeSecuritySystem: "security_system",
         HMServiceTypeCameraControl: "camera",
+        HMServiceTypeCameraRTPStreamManagement: "camera",
+        // HKSV (HomeKit Secure Video) services — no HMServiceType constants exist for these
+        "0000021A-0000-1000-8000-0026BB765291": "camera",  // Camera Operating Mode
+        "00000204-0000-1000-8000-0026BB765291": "camera",  // Camera Recording Management
 
         // Water
         HMServiceTypeIrrigationSystem: "irrigation",

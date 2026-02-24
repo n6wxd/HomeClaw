@@ -71,7 +71,11 @@ struct MenuBarView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Helper Not Running", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
-                if manager.restartsRemaining == 0 {
+                if let diagnostic = manager.launchDiagnostic {
+                    Text(diagnostic)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if manager.restartsRemaining == 0 {
                     Text("Auto-restart exhausted")
                         .font(.caption)
                         .foregroundStyle(.secondary)

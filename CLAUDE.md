@@ -186,6 +186,15 @@ If status shows `ready: false` with 0 homes:
 4. Restart the app after rebuilding
 
 If the helper fails to launch (launchd error 162/163):
+
+The app automatically diagnoses permanent launch failures via `HelperManager.diagnoseLaunchFailure()`, which runs three checks off the main thread:
+1. **Provisioning profile exists** — `embedded.provisionprofile` in the helper bundle
+2. **Code signature valid** — `codesign --verify --deep --strict`
+3. **Device UDID registered** — extracts `ProvisionedDevices` from the profile via `security cms -D` and compares against `system_profiler SPHardwareDataType`
+
+The diagnostic result is stored in `HelperManager.launchDiagnostic` and displayed in the menu bar under "Helper Not Running". When a permanent issue is detected, auto-restart is skipped (it would never succeed). Manual restart clears the diagnostic.
+
+For manual diagnosis:
 1. Verify identity entitlements are present: `codesign -d --entitlements :- .../HomeKitHelper.app` should show `application-identifier` and `com.apple.developer.team-identifier`
 2. Verify `embedded.provisionprofile` exists in the helper bundle — Mac Catalyst apps with restricted entitlements require it
 3. Ensure the provisioning profile matches the signing identity (Apple Development profile + Apple Development signing, NOT mixed with Developer ID)

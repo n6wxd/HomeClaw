@@ -16,6 +16,9 @@ struct SettingsView: View {
             Tab("Devices", systemImage: "list.bullet.rectangle") {
                 DeviceFilterSettingsView()
             }
+            Tab("Integrations", systemImage: "puzzlepiece") {
+                IntegrationsSettingsView()
+            }
         }
         .frame(width: 550, height: 500)
         .onAppear {
