@@ -31,16 +31,10 @@ struct Status: ParsableCommand {
         let accessories = status["accessories"] as? Int ?? 0
         let version = status["version"] as? String ?? "?"
 
-        // MCP port lives in the main app's UserDefaults, not the helper's status response
-        let appDefaults = UserDefaults(suiteName: "com.shahine.homekit-bridge")
-        let storedPort = appDefaults?.integer(forKey: "mcpServerPort") ?? 0
-        let port = storedPort > 0 ? storedPort : 9090
-
         print("HomeKit Bridge v\(version)")
         print("  HomeKit:     \(ready)")
         print("  Homes:       \(homes)")
         print("  Accessories: \(accessories)")
-        print("  MCP Server:  http://127.0.0.1:\(port)/mcp")
         print("  CLI Socket:  \(SocketClient.socketPath)")
     }
 }

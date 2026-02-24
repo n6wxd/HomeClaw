@@ -4,7 +4,7 @@
 
 Control your Apple HomeKit smart home from AI assistants, the terminal, and automation tools.
 
-HomeClaw exposes your HomeKit accessories through an **MCP server**, a **command-line tool**, and plugins for **Claude Code** and **OpenClaw**. It runs as a lightweight macOS menu bar app.
+HomeClaw exposes your HomeKit accessories through a **command-line tool**, a **stdio MCP server**, and plugins for **Claude Code** and **OpenClaw**. It runs as a lightweight macOS menu bar app.
 
 ## Why HomeClaw?
 
@@ -18,22 +18,23 @@ Apple HomeKit has no public API, no CLI, and no way to integrate with AI assista
 ## Architecture
 
 ```
-Claude / AI Assistant
-    │
-    ▼
+Claude Code → Plugin (.claude-plugin/) → stdio MCP server (Node.js) ─┐
+Claude Desktop → stdio MCP server (Node.js) ─────────────────────────┤
+OpenClaw → Plugin (openclaw/) → homekit-cli ─────────────────────────┤
+                                                                     ▼
+                                              /tmp/homekit-bridge.sock
+                                                                     │
+                                              HomeKitHelper (Mac Catalyst, headless)
+                                                ├── HMHomeManager (Apple HomeKit framework)
+                                                └── Unix socket server
+
 homekit-mcp (SwiftUI menu bar app)
-    ├── MCP HTTP server (port 9090, bearer token auth)
     ├── Menu bar UI + Settings window
-    └── Unix socket client
-          │
-          ▼  /tmp/homekit-bridge.sock
-          │
-HomeKitHelper (Mac Catalyst, headless)
-    ├── HMHomeManager (Apple HomeKit framework)
-    └── Unix socket server
+    ├── HelperManager (launches & monitors HomeKitHelper)
+    └── Unix socket client (HomeKitClient)
 ```
 
-**Why two processes?** Apple's `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app handles MCP, UI, and the CLI; the helper handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
+**Why two processes?** Apple's `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app handles UI and helper lifecycle; the helper handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
 
 ## Quick Start
 
@@ -76,23 +77,20 @@ On first launch, grant HomeKit access when prompted. The menu bar icon appears -
 
 ## MCP Tools
 
-The HTTP MCP server (port 9090, bearer token auth) exposes nine tools:
+The stdio MCP server wraps `homekit-cli` and exposes these tools:
 
 | Tool | Description |
 |------|-------------|
-| `list_homes` | List all HomeKit homes with room and accessory counts |
-| `list_accessories` | List accessories with current state, filterable by home and room |
-| `get_accessory` | Full details of a specific accessory including all services and characteristics |
-| `control_accessory` | Set a characteristic value (power, brightness, temperature, lock state, etc.) |
-| `list_rooms` | List all rooms and their accessories |
-| `list_scenes` | List all scenes with type and action counts |
-| `trigger_scene` | Execute a scene by name or UUID |
-| `search_accessories` | Search by name, room, category, manufacturer, or aliases |
-| `device_map` | LLM-optimized device map organized by home/zone/room with semantic types, aliases, and state summaries |
+| `homekit_status` | Check bridge connectivity and accessory count |
+| `homekit_accessories` | List, get details, search, or control accessories |
+| `homekit_rooms` | List rooms and their accessories |
+| `homekit_scenes` | List or trigger scenes |
+| `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
+| `homekit_config` | View or update configuration (set active home, filtering) |
 
 ### Connecting an MCP Client
 
-Any MCP-compatible client can connect. The **stdio server** wraps `homekit-cli` and requires no authentication (the HomeKit Bridge app must be running for the socket). Add this to your MCP client config (e.g. `claude_desktop_config.json`):
+Any MCP-compatible client can connect via the **stdio server**, which wraps `homekit-cli` and requires no authentication (the HomeKit Bridge app must be running for the socket). Add this to your MCP client config (e.g. `claude_desktop_config.json`):
 
 ```json
 {
@@ -106,16 +104,6 @@ Any MCP-compatible client can connect. The **stdio server** wraps `homekit-cli` 
 ```
 
 The `mcp-server.js` is bundled inside the app. You can also use the Integrations tab in Settings to install this automatically.
-
-Alternatively, connect directly to the **HTTP MCP server** at `http://localhost:9090/mcp` with a bearer token. See [Using with Claude Code](#using-with-claude-code) for Claude-specific setup, or test with curl:
-
-```bash
-TOKEN=$(security find-generic-password -s com.shahine.homekit-bridge.auth -a mcp-bearer-token -w)
-curl -X POST http://localhost:9090/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-```
 
 ## CLI
 
@@ -150,56 +138,15 @@ homekit-cli status
 homekit-cli config --default-home "Main House"
 homekit-cli config --filter-mode allowlist
 homekit-cli config --list-devices
-
-# Token management
-homekit-cli token
-homekit-cli token --rotate
 ```
 
 ## Using with Claude Code
 
-HomeClaw integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in two ways: as an **MCP server** (lightweight, just tools) or as a **plugin** (tools + HomeKit skill for richer natural language understanding). Choose one -- they both give Claude access to your smart home.
+HomeClaw integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as a **plugin** that provides MCP tools and a HomeKit skill for richer natural language understanding.
 
-### Option 1: MCP Server (Recommended)
+### Installing the Plugin
 
-HomeClaw includes a Node.js stdio MCP server bundled inside the app. It wraps `homekit-cli`, requires the HomeKit Bridge app to be running (for the Unix socket), and needs no authentication -- perfect for local use.
-
-**Add to Claude Code** by adding the following to your MCP configuration file (`~/.claude.json` for user-scope, or `.mcp.json` in a project):
-
-```json
-{
-  "mcpServers": {
-    "homekit-bridge": {
-      "command": "node",
-      "args": ["/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"]
-    }
-  }
-}
-```
-
-Or add it via the CLI:
-
-```bash
-claude mcp add --scope user homekit-bridge -- node "/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"
-```
-
-Restart Claude Code and the HomeKit tools are available.
-
-**Alternative: HTTP MCP server.** The HomeKit Bridge app also runs a native HTTP MCP server on port 9090 with bearer token auth. This can be used with any MCP client that supports HTTP transport:
-
-```bash
-# Get your bearer token (auto-generated on first app launch)
-TOKEN=$(security find-generic-password -s com.shahine.homekit-bridge.auth -a mcp-bearer-token -w)
-
-# Add via CLI (Claude Code terminal only, not supported in desktop app)
-claude mcp add --scope user --transport http \
-  --header "Authorization: Bearer $TOKEN" \
-  homekit-bridge http://localhost:9090/mcp
-```
-
-### Option 2: Claude Code Plugin
-
-The plugin adds a comprehensive HomeKit **skill** on top of the MCP tools, giving Claude richer context about accessory categories, characteristic value ranges, and natural language patterns. Install from a local clone or directly from GitHub.
+Install from a local clone or directly from GitHub.
 
 **From a local clone:**
 
@@ -232,18 +179,11 @@ After installing, restart Claude Code. Then just ask:
 
 ### Verifying the Connection
 
-After either setup method, verify Claude can reach HomeKit:
+After installing, verify Claude can reach HomeKit:
 
 ```bash
 # Check MCP server status inside Claude Code
 /mcp
-
-# Or test the HTTP server manually
-TOKEN=$(security find-generic-password -s com.shahine.homekit-bridge.auth -a mcp-bearer-token -w)
-curl -s http://localhost:9090/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | python3 -m json.tool
 ```
 
 ## Using with OpenClaw
@@ -300,19 +240,16 @@ HomeClaw supports the full range of HomeKit accessory categories:
 The menu bar provides at-a-glance status and quick actions:
 
 - **HomeKit connection status** -- shows home names (green), or error states with reasons
-- **MCP server port** display
-- **Copy auth token** to clipboard (one click, with confirmation feedback)
 - **Restart helper** -- manual restart when things go wrong, with auto-restart tracking
 - **Settings** link and **Quit**
 
 ## Settings
 
-Five configuration tabs accessible from the menu bar:
+Four configuration tabs accessible from the menu bar:
 
 | Tab | Features |
 |-----|----------|
 | **General** | Launch at Login toggle, app version display |
-| **Server** | MCP port (editable), endpoint URL, bearer token reveal/copy/rotate |
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles grouped by room, search, bulk select/deselect |
 | **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
@@ -334,7 +271,7 @@ Control which accessories are exposed to MCP clients and the CLI. Switch between
 Install and manage connections to AI assistants. The app detects existing configurations and guides you through setup:
 
 - **Claude Desktop** -- one-click install of the bundled stdio MCP server (requires Node.js)
-- **Claude Code** -- detects the installed plugin (`homekit-bridge@homekit-bridge`) or legacy MCP config
+- **Claude Code** -- detects the installed plugin (`homekit-bridge@homekit-bridge`)
 - **OpenClaw** -- detects plugin configuration on the remote gateway and provides setup instructions
 
 <p align="center"><img src="docs/images/settings-integrations.png" width="500" alt="Integrations settings tab"></p>
@@ -350,13 +287,6 @@ homekit-cli config --list-devices  # shows allowed/filtered status
 ```
 
 Config stored at `~/.config/homekit-bridge/config.json`.
-
-## Authentication
-
-- **Bearer token** stored in macOS Keychain (`com.shahine.homekit-bridge.auth`)
-- Auto-generated on first launch
-- Rotatable from Settings UI or CLI (`homekit-cli token --rotate`)
-- Required for all MCP HTTP requests via `Authorization: Bearer <TOKEN>` header
 
 ## Helper Process Management
 
@@ -440,12 +370,13 @@ Apple restricts the `com.apple.developer.homekit` entitlement to **development s
 Sources/
   homekit-mcp/             Main app (SPM executable)
     App/                   SwiftUI entry, AppDelegate, HelperManager
-    MCP/                   MCP server, HTTP handler, tool definitions
     HomeKit/               HomeKitClient (socket client to helper)
     Views/                 MenuBarView, SettingsView
-    Shared/                AppConfig, KeychainManager, Logger
+    Shared/                AppConfig, Logger
+    MCP/_disabled/         Preserved HTTP MCP server code (not compiled)
+    Shared/_disabled/      Preserved KeychainManager (not compiled)
   homekit-cli/             CLI tool (SPM executable)
-    Commands/              list, get, set, search, scenes, status, config, token
+    Commands/              list, get, set, search, scenes, status, config, device-map
     SocketClient.swift     Direct socket communication
   HomeKitHelper/           Catalyst helper app (Xcode project via XcodeGen)
     HomeKitManager.swift   HMHomeManager wrapper (@MainActor)
@@ -457,7 +388,7 @@ scripts/
   build.sh                 Build, sign, and install
   bump-version.sh          Update version across all 9 files
 mcp-server/                Node.js stdio MCP server (wraps homekit-cli)
-openclaw/                  Claude Code plugin (HomeClaw)
+openclaw/                  OpenClaw plugin (HomeClaw)
   skills/homekit/          HomeKit skill with full characteristic reference
 ```
 
@@ -490,9 +421,8 @@ sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
 - **Swift 6** with strict concurrency (`@MainActor`, `actor` isolation)
 - **SwiftUI** for menu bar and settings UI
 - **Mac Catalyst** for HomeKit framework access
-- **[MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk)** for the HTTP MCP server
 - **[Swift Argument Parser](https://github.com/apple/swift-argument-parser)** for CLI
-- **Node.js** + **[@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)** for stdio MCP wrapper
+- **Node.js** + **[@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)** for stdio MCP server
 - **XcodeGen** for HomeKitHelper project generation
 - **GCD** + Unix domain sockets for IPC
 
@@ -584,17 +514,6 @@ codesign -d --entitlements :- "/Applications/HomeKit Bridge.app/Contents/Helpers
 # Check which devices are in the provisioning profile
 security cms -D -i "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract ProvisionedDevices json -o - -
 ```
-
-### The CLI works but the MCP server doesn't respond
-
-The CLI (`homekit-cli`) talks directly to the helper over the Unix socket. The MCP server adds an HTTP layer on top. If the CLI works but MCP doesn't:
-
-1. **Is the app running?** The MCP server only runs inside the HomeKit Bridge menu bar app, not standalone.
-2. **Check the port:** Default is 9090. Verify in Settings > Server or: `curl http://localhost:9090/mcp`
-3. **Check the token:** MCP requires bearer auth. Get the current token:
-   ```bash
-   security find-generic-password -s com.shahine.homekit-bridge.auth -a mcp-bearer-token -w
-   ```
 
 ## License
 

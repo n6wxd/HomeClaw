@@ -1,37 +1,46 @@
 # HomeKit Bridge
 
-HomeKit Bridge exposes Apple HomeKit accessories via an MCP (Model Context Protocol) HTTP server and a CLI tool. It uses a split-process architecture to work around Apple's framework restrictions.
+HomeKit Bridge exposes Apple HomeKit accessories via a CLI tool, plugins for Claude Code and OpenClaw, and a stdio MCP server for Claude Desktop. It uses a split-process architecture to work around Apple's framework restrictions.
 
 ## Architecture
 
 ```
+Claude Code → Plugin (.claude-plugin/) → stdio MCP server (Node.js) ─┐
+Claude Desktop → stdio MCP server (Node.js) ─────────────────────────┤
+OpenClaw → Plugin (openclaw/) → homekit-cli ─────────────────────────┤
+                                                                     ▼
+                                              /tmp/homekit-bridge.sock (JSON newline-delimited)
+                                                                     │
+                                              HomeKitHelper (Mac Catalyst UIKit app, headless)
+                                                ├── HMHomeManager (requires @MainActor)
+                                                ├── HomeKit device discovery & control
+                                                └── Unix socket server (GCD-based)
+
 homekit-mcp (SPM, SwiftUI menu bar app)
-  ├── MCP HTTP server (port 9090, bearer token auth)
   ├── Menu bar UI + Settings window
-  └── Unix socket client
-        │
-        ▼ /tmp/homekit-bridge.sock (JSON newline-delimited)
-        │
-HomeKitHelper (Mac Catalyst UIKit app, headless)
-  ├── HMHomeManager (requires @MainActor)
-  ├── HomeKit device discovery & control
-  └── Unix socket server (GCD-based)
+  ├── HelperManager (launches & monitors HomeKitHelper)
+  └── Unix socket client (HomeKitClient)
 ```
 
-**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homekit-mcp`) handles MCP and UI; the helper (`HomeKitHelper`) handles HomeKit.
+**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homekit-mcp`) handles UI and helper lifecycle; the helper (`HomeKitHelper`) handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
+
+**Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homekit-mcp/MCP/_disabled/` and `Sources/homekit-mcp/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
 
 ## Project Structure
 
 ```
 Sources/
   homekit-mcp/           # Main app (SPM executable)
-    App/                 # SwiftUI app entry, AppDelegate
-    MCP/                 # MCP server, HTTP handler, tool definitions
+    App/                 # SwiftUI app entry, AppDelegate, HelperManager
+    MCP/                 # (empty — HTTP server moved to _disabled/)
+    MCP/_disabled/       # Preserved HTTP MCP server code (not compiled)
     HomeKit/             # HomeKitClient (socket client to helper)
     Views/               # MenuBarView, SettingsView
-    Shared/              # AppConfig, KeychainManager, Logger
+    Shared/              # AppConfig, Logger
+    Shared/_disabled/    # Preserved KeychainManager (not compiled)
   homekit-cli/           # CLI tool (SPM executable)
-    Commands/            # list, get, set, search, scenes, status, config, token
+    Commands/            # list, get, set, search, scenes, status, config, device-map
+    Commands/_disabled/  # Preserved token command (not compiled)
     SocketClient.swift   # Direct socket communication
   HomeKitHelper/         # Catalyst helper app (Xcode project via XcodeGen)
     HomeKitManager.swift # HMHomeManager wrapper (@MainActor)
@@ -41,7 +50,7 @@ Sources/
 Resources/               # Info.plist, entitlements, app icons
 scripts/build.sh         # Build & install script
 mcp-server/              # Node.js stdio MCP server (wraps homekit-cli)
-openclaw/                # HomeClaw — OpenClaw plugin for Claude Code
+openclaw/                # HomeClaw — OpenClaw plugin
   openclaw.plugin.json   # Plugin manifest (configurable binDir)
   src/index.ts           # Plugin entry point
   skills/homekit/        # HomeKit skill definition
@@ -83,12 +92,8 @@ open .build/app/HomeKit\ Bridge.app
 # Iterate on SPM code only (skip slow Catalyst build)
 scripts/build.sh --debug --skip-helper
 
-# Test MCP endpoint (requires running app with valid token)
-TOKEN=$(security find-generic-password -s com.shahine.homekit-bridge.auth -a mcp-bearer-token -w 2>/dev/null)
-curl -X POST http://localhost:9090/mcp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+# Test HomeKit connection over the socket
+echo '{"command":"status"}' | nc -U /tmp/homekit-bridge.sock
 ```
 
 ## Critical: Entitlements & Distribution
@@ -143,20 +148,18 @@ Xcode automatic signing creates the required provisioning profile for the develo
 
 | Setting | Location | Default |
 |---------|----------|---------|
-| MCP port | UserDefaults `mcpServerPort` | 9090 |
-| Bearer token | Keychain `com.shahine.homekit-bridge.auth` | Auto-generated |
 | Device filter | `~/.config/homekit-bridge/config.json` | `"accessoryFilterMode": "all"` |
 | Default home | `~/.config/homekit-bridge/config.json` | First home |
 | Socket path | Hardcoded | `/tmp/homekit-bridge.sock` |
 
 ## MCP Tools
 
-Tools are defined in `Sources/homekit-mcp/MCP/ToolHandlers.swift`. Eight tools cover home/room/accessory listing, accessory control, scene management, and search. New tools: add to `allTools` array and `handleToolCall` switch.
+The stdio MCP server (`mcp-server/`) wraps `homekit-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, and search. Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
 
 ## Concurrency Model
 
 - **HomeKitHelper**: `HomeKitManager` is `@MainActor` (required by `HMHomeManager`). Socket server uses GCD with semaphore+ResponseBox to bridge to MainActor.
-- **homekit-mcp**: `MCPServer` is an `actor`. SwiftUI views use `@State` + `Task` for async data loading.
+- **homekit-mcp**: SwiftUI views use `@State` + `Task` for async data loading.
 - Swift 6 strict concurrency is enabled (`SWIFT_STRICT_CONCURRENCY: complete`).
 
 ## Debugging
@@ -201,7 +204,6 @@ For manual diagnosis:
 
 - Swift 6 with strict concurrency
 - `@MainActor` for all HomeKit API interactions
-- `actor` for MCP server isolation
 - `os.Logger` via `AppLogger` (main app) and `HelperLogger` (helper)
 - JSON communication over Unix domain sockets (newline-delimited)
 

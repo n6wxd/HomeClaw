@@ -27,7 +27,7 @@ The `homekit-cli` binary is the primary interface. Read commands support `--json
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `status` | `[--json]` | Show HomeKit Bridge status (connectivity, home/accessory counts, MCP port) |
+| `status` | `[--json]` | Show HomeKit Bridge status (connectivity, home/accessory counts) |
 | `list` | `[--room NAME] [--category TYPE] [--json]` | List HomeKit accessories with optional filters. Returns enriched results with `semantic_type`, `display_name`, `manufacturer`, `zone`. |
 | `get` | `<name-or-uuid> [--json]` | Get detailed info about an accessory (all services and characteristics) |
 | `set` | `<name-or-uuid> <characteristic> <value>` | Set a characteristic on an accessory |
@@ -36,7 +36,6 @@ The `homekit-cli` binary is the primary interface. Read commands support `--json
 | `trigger` | `<scene-name-or-uuid>` | Trigger a HomeKit scene |
 | `device-map` | `[--json]` | Show LLM-optimized device map with semantic types, aliases, and zone hierarchy |
 | `config` | `[--default-home NAME] [--clear] [--filter-mode MODE] [--allow-accessories IDS] [--list-devices] [--json]` | View or update configuration |
-| `token` | `[--rotate]` | Show or rotate the MCP bearer token |
 
 ### Output Formats
 
@@ -73,7 +72,6 @@ homekit-cli status
 #   HomeKit:     Connected
 #   Homes:       2
 #   Accessories: 192
-#   MCP Server:  http://127.0.0.1:9090/mcp
 #   CLI Socket:  /tmp/homekit-bridge.sock
 ```
 

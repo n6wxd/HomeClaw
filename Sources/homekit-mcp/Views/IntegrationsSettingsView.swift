@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct IntegrationsSettingsView: View {
-    @AppStorage(AppConfig.portKey) private var port = AppConfig.defaultPort
-
     @State private var claudeDesktopStatus: DesktopStatus = .checking
     @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
     @State private var openClawStatus: OpenClawStatus = .checking
@@ -22,8 +20,6 @@ struct IntegrationsSettingsView: View {
         case checking
         /// Plugin detected in ~/.claude/settings.json enabledPlugins.
         case pluginInstalled
-        /// Legacy HTTP MCP config in ~/.claude.json (works, but plugin preferred).
-        case mcpConfigured
         /// Neither plugin nor MCP config found.
         case notInstalled
     }
@@ -48,10 +44,6 @@ struct IntegrationsSettingsView: View {
     private static var claudeDesktopConfigPath: String {
         FileManager.default.homeDirectoryForCurrentUser.path
             + "/Library/Application Support/Claude/claude_desktop_config.json"
-    }
-
-    private static var claudeCodeConfigPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.path + "/.claude.json"
     }
 
     private static var claudeCodeSettingsPath: String {
@@ -164,29 +156,6 @@ struct IntegrationsSettingsView: View {
                 Text("HomeKit Bridge plugin is installed and active.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-            case .mcpConfigured:
-                LabeledContent("Endpoint") {
-                    Text("http://localhost:\(port)\(AppConfig.mcpEndpoint)")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-
-                HStack {
-                    Button("Copy Plugin Install Commands") {
-                        copyInstallCommands()
-                    }
-                    Button("Remove MCP Config", role: .destructive) {
-                        remove(from: Self.claudeCodeConfigPath)
-                        claudeCodeStatus = .notInstalled
-                    }
-                }
-
-                Text(
-                    "HTTP MCP config detected in ~/.claude.json. Consider switching to the plugin for easier updates."
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
 
             case .notInstalled:
                 Button("Copy Install Commands") {
@@ -311,9 +280,6 @@ struct IntegrationsSettingsView: View {
         case .pluginInstalled:
             Label("Plugin Installed", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .mcpConfigured:
-            Label("MCP Config", systemImage: "checkmark.circle")
-                .foregroundStyle(.green)
         case .notInstalled:
             Label("Not Installed", systemImage: "circle")
                 .foregroundStyle(.secondary)
@@ -359,12 +325,7 @@ struct IntegrationsSettingsView: View {
     }
 
     private func checkClaudeCodeStatus() -> ClaudeCodeStatus {
-        // Check for plugin first (preferred approach)
         if isPluginEnabled() { return .pluginInstalled }
-
-        // Check for legacy HTTP MCP config in ~/.claude.json
-        if isMCPConfigured() { return .mcpConfigured }
-
         return .notInstalled
     }
 
@@ -374,14 +335,6 @@ struct IntegrationsSettingsView: View {
             let enabled = config["enabledPlugins"] as? [String: Any]
         else { return false }
         return enabled.keys.contains { $0.hasPrefix(Self.pluginPrefix) }
-    }
-
-    /// Checks ~/.claude.json mcpServers for a "homekit-bridge" entry.
-    private func isMCPConfigured() -> Bool {
-        guard let config = readConfig(at: Self.claudeCodeConfigPath),
-            let servers = config["mcpServers"] as? [String: Any]
-        else { return false }
-        return servers[Self.serverName] != nil
     }
 
     private func checkOpenClawStatus() -> OpenClawStatus {
@@ -518,10 +471,6 @@ struct IntegrationsSettingsView: View {
     }
 
     // MARK: - Helpers
-
-    private func currentToken() -> String? {
-        try? KeychainManager.readToken()
-    }
 
     /// Finds the absolute path to the `node` binary, or nil if not installed.
     private func nodeJSPath() -> String? {
