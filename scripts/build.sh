@@ -12,10 +12,16 @@ APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
 HELPER_PROJECT="$PROJECT_ROOT/Sources/HomeKitHelper"
 TEAM_ID="YOUR_TEAM_ID"
 
+# Notarization credentials (App Store Connect API key)
+NOTARY_KEY="$HOME/.private_keys/AuthKey_REDACTED_KEY_ID.p8"
+NOTARY_KEY_ID="REDACTED_KEY_ID"
+NOTARY_ISSUER="REDACTED_ISSUER_ID"
+
 # Defaults
 BUILD_CONFIG="release"
 DO_INSTALL=false
 DO_CLEAN=false
+DO_NOTARIZE=false
 SKIP_HELPER=false
 
 # ─── Helpers ────────────────────────────────────────────────────────
@@ -47,6 +53,7 @@ Options:
   --release       Build in release mode (default)
   --debug         Build in debug mode
   --install       Install to /Applications and symlink CLI
+  --notarize      Sign with Developer ID, submit to Apple notary, and staple
   --clean         Clean build artifacts first
   --skip-helper   Skip building HomeKitHelper (faster iteration)
   --help          Show this help
@@ -61,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --release)      BUILD_CONFIG="release"; shift ;;
         --debug)        BUILD_CONFIG="debug"; shift ;;
         --install)      DO_INSTALL=true; shift ;;
+        --notarize)     DO_NOTARIZE=true; BUILD_CONFIG="release"; shift ;;
         --clean)        DO_CLEAN=true; shift ;;
         --skip-helper)  SKIP_HELPER=true; shift ;;
         --help|-h)      usage ;;
@@ -93,10 +101,15 @@ fi
 # ─── Detect signing identity ───────────────────────────────────────
 
 detect_signing_identity() {
-    local identity
-    identity=$(security find-identity -v -p codesigning | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    local identity search_term
+    if $DO_NOTARIZE; then
+        search_term="Developer ID Application"
+    else
+        search_term="Apple Development"
+    fi
+    identity=$(security find-identity -v -p codesigning | grep "$search_term" | head -1 | sed 's/.*"\(.*\)".*/\1/')
     if [[ -z "$identity" ]]; then
-        echo "Warning: No Apple Development signing identity found. Skipping code signing." >&2
+        echo "Warning: No $search_term signing identity found. Skipping code signing." >&2
         echo ""
     else
         echo "$identity"
@@ -108,6 +121,9 @@ detect_signing_identity() {
 TOTAL_STEPS=5
 if $SKIP_HELPER; then
     TOTAL_STEPS=4
+fi
+if $DO_NOTARIZE; then
+    TOTAL_STEPS=$((TOTAL_STEPS + 1))
 fi
 
 CURRENT_STEP=0
@@ -221,17 +237,23 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
     # IMPORTANT: The outer bundle must NOT use --deep, otherwise it re-signs the
     # helper with the main app's entitlements, stripping com.apple.developer.homekit.
 
+    # Notarization requires hardened runtime and secure timestamps
+    CODESIGN_FLAGS=(--force --sign "$SIGNING_IDENTITY")
+    if $DO_NOTARIZE; then
+        CODESIGN_FLAGS+=(--options runtime --timestamp)
+    fi
+
     if ! $SKIP_HELPER && [[ -d "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" ]]; then
-        codesign --force --deep --sign "$SIGNING_IDENTITY" \
+        codesign "${CODESIGN_FLAGS[@]}" --deep \
             --entitlements "$HELPER_ENTITLEMENTS" \
             "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app" 2>/dev/null
     fi
 
-    codesign --force --sign "$SIGNING_IDENTITY" \
+    codesign "${CODESIGN_FLAGS[@]}" \
         --entitlements "$MAIN_ENTITLEMENTS" \
         "$APP_BUNDLE/Contents/MacOS/homekit-mcp" 2>/dev/null
 
-    codesign --force --sign "$SIGNING_IDENTITY" \
+    codesign "${CODESIGN_FLAGS[@]}" \
         --entitlements "$MAIN_ENTITLEMENTS" \
         "$APP_BUNDLE" 2>/dev/null
 
@@ -254,6 +276,44 @@ if [[ -n "${SIGNING_IDENTITY:-}" ]]; then
         echo "  Code signature: INVALID (run codesign --verify --deep --strict to diagnose)"
     fi
     echo ""
+fi
+
+# ─── Notarize ───────────────────────────────────────────────────────
+
+if $DO_NOTARIZE; then
+    next_step
+    step "$CURRENT_STEP" "$TOTAL_STEPS" "Notarizing"
+
+    if [[ ! -f "$NOTARY_KEY" ]]; then
+        step_fail "API key not found at $NOTARY_KEY. Download from App Store Connect."
+    fi
+
+    # Create a zip for submission
+    NOTARIZE_ZIP="$BUNDLE_DIR/$APP_NAME.zip"
+    ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP" 2>/dev/null
+
+    # Submit to Apple notary service and wait for result
+    if xcrun notarytool submit "$NOTARIZE_ZIP" \
+        --key "$NOTARY_KEY" \
+        --key-id "$NOTARY_KEY_ID" \
+        --issuer "$NOTARY_ISSUER" \
+        --wait 2>&1 | tee /tmp/notarize-output.txt | tail -3; then
+
+        # Staple the notarization ticket to the app bundle
+        if xcrun stapler staple "$APP_BUNDLE" 2>/dev/null; then
+            step_done
+            echo ""
+            echo "  Notarization: success"
+        else
+            step_fail "Stapling failed"
+        fi
+    else
+        echo ""
+        cat /tmp/notarize-output.txt
+        step_fail "Notarization failed. Check output above for details."
+    fi
+
+    rm -f "$NOTARIZE_ZIP"
 fi
 
 # ─── Install ────────────────────────────────────────────────────────
