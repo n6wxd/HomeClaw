@@ -145,16 +145,16 @@ homekit-cli trigger "Movie Time"
 homekit-cli list --room "Living Room"
 ```
 
-### Configure default home
+### Switch active home
 
 ```bash
-# View current config
+# View current config (shows active home)
 homekit-cli config
 
-# Set default home
+# Set active home
 homekit-cli config --default-home "My Home"
 
-# Clear default (query all homes)
+# Reset to primary home
 homekit-cli config --clear
 
 # Show all devices with filter status
@@ -209,18 +209,18 @@ python3 -c "import json; d=json.load(open('/tmp/hk-result.json')); print(json.du
 | Command | Args | Description |
 |---------|------|-------------|
 | `status` | — | Bridge connectivity, home count, accessory count, cache info |
-| `list_homes` | — | List all homes with room and accessory counts |
-| `list_accessories` | `home_id?`, `room?` | List accessories (filtered by config) |
+| `list_homes` | — | List all homes with room and accessory counts. Shows `is_selected` for active home. |
+| `list_accessories` | `room?` | List accessories in active home (filtered by config) |
 | `list_all_accessories` | — | List all accessories (ignores filter config) |
 | `get_accessory` | `id` (required) | Full detail with all services and characteristics |
 | `control` | `id`, `characteristic`, `value` (all required) | Set a characteristic value |
 | `search` | `query` (required), `category?` | Search by name, room, category, semantic type, manufacturer, or aliases |
-| `device_map` | `home_id?` | LLM-optimized device map with semantic types, aliases, and zone hierarchy |
-| `list_rooms` | `home_id?` | List rooms and their accessories |
-| `list_scenes` | `home_id?` | List all scenes |
+| `device_map` | — | LLM-optimized device map with semantic types, aliases, and zone hierarchy |
+| `list_rooms` | — | List rooms and their accessories |
+| `list_scenes` | — | List all scenes |
 | `trigger_scene` | `id` (required) | Execute a scene by UUID or name |
 | `get_config` | — | Current config plus home list and accessory counts |
-| `set_config` | `default_home_id?`, `accessory_filter_mode?`, `allowed_accessory_ids?`, `temperature_unit?` | Update config |
+| `set_config` | `default_home_id?`, `accessory_filter_mode?`, `allowed_accessory_ids?`, `temperature_unit?` | Update config. `default_home_id` sets the active home. |
 | `refresh_cache` | — | Force-refresh the accessory characteristic cache |
 
 ## Error Handling
@@ -240,7 +240,7 @@ Config file: `~/.config/homekit-bridge/config.json`
 
 | Setting | Values | Default |
 |---------|--------|---------|
-| `default_home_id` | Home name or UUID | (none — all homes) |
+| `default_home_id` | Home name or UUID | Primary home |
 | `accessory_filter_mode` | `all`, `allowlist` | `all` |
 | `allowed_accessory_ids` | Array of UUIDs | `[]` |
 | `temperature_unit` | `fahrenheit`, `celsius`, `auto` | `auto` (uses system locale) |

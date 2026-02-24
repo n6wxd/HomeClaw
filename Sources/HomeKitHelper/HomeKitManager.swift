@@ -41,7 +41,13 @@ final class HomeKitManager: NSObject, Observable {
 
     func listHomes() async -> [[String: Any]] {
         await waitForReady()
-        return homes.map { AccessoryModel.homeSummary($0) }
+        let activeHomes = filteredHomes(homeID: nil)
+        let activeID = activeHomes.first?.uniqueIdentifier
+        return homes.map { home in
+            var dict = AccessoryModel.homeSummary(home)
+            dict["is_selected"] = (home.uniqueIdentifier == activeID)
+            return dict
+        }
     }
 
     // MARK: - Rooms
@@ -53,13 +59,11 @@ final class HomeKitManager: NSObject, Observable {
         for home in targetHomes {
             for room in home.rooms {
                 let filtered = filterAccessories(room.accessories)
-                var dict = AccessoryModel.roomSummary(room, homeID: home.uniqueIdentifier)
+                var dict = AccessoryModel.roomSummary(room)
                 dict["accessory_count"] = filtered.count
-                let hName: String? = homes.count > 1 ? home.name : nil
-                let hID: String? = homes.count > 1 ? home.uniqueIdentifier.uuidString : nil
                 dict["accessories"] = filtered.map { accessory in
                     let id = accessory.uniqueIdentifier.uuidString
-                    return AccessoryModel.accessorySummary(accessory, cachedState: cache.cachedState(for: id), homeName: hName, homeID: hID)
+                    return AccessoryModel.accessorySummary(accessory, cachedState: cache.cachedState(for: id))
                 }
                 result.append(dict)
             }
@@ -88,8 +92,8 @@ final class HomeKitManager: NSObject, Observable {
 
         let filtered = filterAccessories(accessories)
 
-        // Pre-compute enrichment data
-        let allFiltered = homes.flatMap { filterAccessories($0.accessories) }
+        // Pre-compute enrichment data (scoped to target homes)
+        let allFiltered = targetHomes.flatMap { filterAccessories($0.accessories) }
         let displayNames = DeviceMap.computeDisplayNames(for: allFiltered)
         let roomZones = buildRoomZoneLookup(for: targetHomes)
 
@@ -97,29 +101,25 @@ final class HomeKitManager: NSObject, Observable {
             let id = accessory.uniqueIdentifier
             let semanticType = DeviceMap.inferSemanticType(for: accessory)
             let zone: String? = accessory.room.flatMap { roomZones[$0.uniqueIdentifier] }
-            let (homeName, hID) = homeInfo(for: accessory)
             return AccessoryModel.accessorySummary(
                 accessory,
                 cachedState: cache.cachedState(for: id.uuidString),
                 zone: zone,
                 displayName: displayNames[id],
-                semanticType: semanticType.rawValue,
-                homeName: homeName,
-                homeID: hID
+                semanticType: semanticType.rawValue
             )
         }
         if cache.isStale { Task { await warmCache() } }
         return result
     }
 
-    func getAccessory(id: String) async -> [String: Any]? {
+    func getAccessory(id: String, homeID: String? = nil) async -> [String: Any]? {
         await waitForReady()
-        guard let accessory = findAccessory(id: id) else { return nil }
+        guard let accessory = findAccessory(id: id, homeID: homeID) else { return nil }
         guard isAccessoryAllowed(accessory) else { return nil }
         await readAllValues(for: accessory)
         updateCacheFromAccessory(accessory)
-        let (homeName, hID) = homeInfo(for: accessory)
-        return AccessoryModel.accessoryDetail(accessory, homeName: homeName, homeID: hID)
+        return AccessoryModel.accessoryDetail(accessory)
     }
 
     // MARK: - Control
@@ -144,10 +144,10 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
-    func controlAccessory(id: String, characteristic: String, value: String) async throws -> [String: Any] {
+    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
 
-        guard let accessory = findAccessory(id: id) else {
+        guard let accessory = findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
         }
         guard isAccessoryAllowed(accessory) else {
@@ -184,8 +184,7 @@ final class HomeKitManager: NSObject, Observable {
         // Read back current values, update cache, and return updated state
         await readInterestingValues(for: accessory)
         updateCacheFromAccessory(accessory)
-        let (homeName, hID) = homeInfo(for: accessory)
-        return AccessoryModel.accessorySummary(accessory, homeName: homeName, homeID: hID)
+        return AccessoryModel.accessorySummary(accessory)
     }
 
     // MARK: - Scenes
@@ -194,29 +193,30 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         let targetHomes = filteredHomes(homeID: homeID)
         return targetHomes.flatMap { home in
-            home.actionSets.map { AccessoryModel.sceneSummary($0, homeID: home.uniqueIdentifier) }
+            home.actionSets.map { AccessoryModel.sceneSummary($0) }
         }
     }
 
-    func triggerScene(id: String) async throws -> [String: Any] {
+    func triggerScene(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
 
-        for home in homes {
+        for home in targetHomes {
             if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
                 try await home.executeActionSet(actionSet)
                 HelperLogger.homekit.info("Triggered scene: \(actionSet.name)")
-                return AccessoryModel.sceneSummary(actionSet, homeID: home.uniqueIdentifier)
+                return AccessoryModel.sceneSummary(actionSet)
             }
         }
 
         // Try by name
-        for home in homes {
+        for home in targetHomes {
             if let actionSet = home.actionSets.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
             }) {
                 try await home.executeActionSet(actionSet)
                 HelperLogger.homekit.info("Triggered scene: \(actionSet.name)")
-                return AccessoryModel.sceneSummary(actionSet, homeID: home.uniqueIdentifier)
+                return AccessoryModel.sceneSummary(actionSet)
             }
         }
 
@@ -282,15 +282,12 @@ final class HomeKitManager: NSObject, Observable {
             let id = accessory.uniqueIdentifier
             let semanticType = DeviceMap.inferSemanticType(for: accessory)
             let zone: String? = accessory.room.flatMap { roomZones[$0.uniqueIdentifier] }
-            let (homeName, hID) = homeInfo(for: accessory)
             return AccessoryModel.accessorySummary(
                 accessory,
                 cachedState: cache.cachedState(for: id.uuidString),
                 zone: zone,
                 displayName: displayNames[id],
-                semanticType: semanticType.rawValue,
-                homeName: homeName,
-                homeID: hID
+                semanticType: semanticType.rawValue
             )
         }
         if cache.isStale { Task { await warmCache() } }
@@ -472,38 +469,40 @@ final class HomeKitManager: NSObject, Observable {
         return allowed.contains(accessory.uniqueIdentifier.uuidString)
     }
 
-    /// Returns (homeName, homeID) for an accessory, or (nil, nil) if there's only one home.
-    /// Only populates when multiple homes exist to keep responses clean.
-    private func homeInfo(for accessory: HMAccessory) -> (String?, String?) {
-        guard homes.count > 1 else { return (nil, nil) }
-        for home in homes where home.accessories.contains(where: { $0.uniqueIdentifier == accessory.uniqueIdentifier }) {
-            return (home.name, home.uniqueIdentifier.uuidString)
-        }
-        return (nil, nil)
-    }
-
     private func filteredHomes(homeID: String?) -> [HMHome] {
+        // Single home — no ambiguity
+        if homes.count <= 1 { return homes }
+
         // Use explicit homeID if provided, otherwise fall back to configured default
         let effectiveID = homeID ?? HelperConfig.shared.defaultHomeID
-        guard let effectiveID else { return homes }
 
-        // Match by UUID first, then by name
-        let byUUID = homes.filter { $0.uniqueIdentifier.uuidString == effectiveID }
-        if !byUUID.isEmpty { return byUUID }
+        if let effectiveID {
+            // Match by UUID first, then by name
+            let byUUID = homes.filter { $0.uniqueIdentifier.uuidString == effectiveID }
+            if !byUUID.isEmpty { return byUUID }
 
-        let byName = homes.filter { $0.name.localizedCaseInsensitiveCompare(effectiveID) == .orderedSame }
-        return byName.isEmpty ? homes : byName
+            let byName = homes.filter { $0.name.localizedCaseInsensitiveCompare(effectiveID) == .orderedSame }
+            if !byName.isEmpty { return byName }
+        }
+
+        // No configured default or match failed — use primary home to avoid mixing
+        if let primary = homes.first(where: \.isPrimary) {
+            return [primary]
+        }
+        return [homes[0]]
     }
 
-    private func findAccessory(id: String) -> HMAccessory? {
-        // Try UUID first
-        for home in homes {
+    private func findAccessory(id: String, homeID: String? = nil) -> HMAccessory? {
+        let targetHomes = filteredHomes(homeID: homeID)
+
+        // Try UUID first (within target homes)
+        for home in targetHomes {
             if let accessory = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == id }) {
                 return accessory
             }
         }
-        // Try name match
-        for home in homes {
+        // Try name match (within target homes)
+        for home in targetHomes {
             if let accessory = home.accessories.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
             }) {

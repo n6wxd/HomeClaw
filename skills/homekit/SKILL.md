@@ -50,8 +50,6 @@ Returns a complete LLM-optimized device map organized by home/zone/room hierarch
 
 **Use this tool first** when you need to understand the device landscape before controlling devices. It resolves name collisions and identifies switches that actually control lights.
 
-Optional parameter: `home_id` (defaults to configured home).
-
 ### Semantic Type Reference
 
 | Semantic Type | Maps From | Key Distinction |
@@ -71,7 +69,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 | Action | Required Params | Description |
 |--------|----------------|-------------|
-| `list` | — | List all accessories. Optional: `room`, `home_id`. Returns enriched results with `semantic_type`, `display_name`, `manufacturer`, `zone`. |
+| `list` | — | List all accessories. Optional: `room`. Returns enriched results with `semantic_type`, `display_name`, `manufacturer`, `zone`. |
 | `get` | `accessory_id` | Get full detail with all characteristics |
 | `search` | `query` | Search by name, room, category, semantic type, manufacturer, or aliases (e.g., "kitchen light" matches switches with lightbulb services). Optional: `category` |
 | `control` | `accessory_id`, `characteristic`, `value` | Set a characteristic value |
@@ -80,7 +78,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 | Action | Required Params | Description |
 |--------|----------------|-------------|
-| `list` | — | List all scenes. Optional: `home_id` |
+| `list` | — | List all scenes |
 | `trigger` | `scene_id` | Execute a scene by name or UUID |
 
 ### homekit_config
@@ -129,7 +127,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 1. Filter by room: `homekit_accessories` with `action: "list"`, `room: "Living Room"`
 
-### Set default home
+### Switch active home
 
 1. Configure: `homekit_config` with `action: "set"`, `default_home_id: "My Home"`
 
@@ -150,7 +148,7 @@ Config file: `~/.config/homekit-bridge/config.json`
 
 | Setting | Values | Default |
 |---------|--------|---------|
-| `default_home_id` | Home name or UUID | (none — all homes) |
+| `default_home_id` | Home name or UUID | Primary home |
 | `accessory_filter_mode` | `all`, `allowlist` | `all` |
 | `allowed_accessory_ids` | Array of UUIDs | `[]` |
 | `temperature_unit` | `fahrenheit`, `celsius`, `auto` | `auto` (uses system locale) |

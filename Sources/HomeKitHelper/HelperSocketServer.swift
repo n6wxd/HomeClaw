@@ -198,7 +198,7 @@ final class HelperSocketServer: @unchecked Sendable {
                 guard let id = args["id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' argument")
                 }
-                guard let accessory = await hk.getAccessory(id: id) else {
+                guard let accessory = await hk.getAccessory(id: id, homeID: args["home_id"] as? String) else {
                     return encodeResponse(success: false, error: "Accessory not found: \(id)")
                 }
                 result = accessory
@@ -210,7 +210,7 @@ final class HelperSocketServer: @unchecked Sendable {
                 else {
                     return encodeResponse(success: false, error: "Missing id, characteristic, or value")
                 }
-                result = try await hk.controlAccessory(id: id, characteristic: characteristic, value: value)
+                result = try await hk.controlAccessory(id: id, characteristic: characteristic, value: value, homeID: args["home_id"] as? String)
 
             case "list_rooms":
                 result = await hk.listRooms(homeID: args["home_id"] as? String)
@@ -222,7 +222,7 @@ final class HelperSocketServer: @unchecked Sendable {
                 guard let id = args["id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' argument")
                 }
-                result = try await hk.triggerScene(id: id)
+                result = try await hk.triggerScene(id: id, homeID: args["home_id"] as? String)
 
             case "refresh_cache":
                 result = await hk.refreshCache()

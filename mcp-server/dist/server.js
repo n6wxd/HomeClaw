@@ -20786,7 +20786,7 @@ var tools = [
         },
         default_home_id: {
           type: "string",
-          description: 'Home UUID or name to set as default (set action). Use empty string or "none" to clear.'
+          description: "Home UUID or name to set as active home (set action). All commands operate on the active home."
         },
         accessory_filter_mode: {
           type: "string",
@@ -20863,11 +20863,14 @@ async function handleAccessories(args) {
     }
     case "get": {
       if (!args.accessory_id) throw new Error("accessory_id is required for get action");
-      return sendCommand("get_accessory", { id: args.accessory_id });
+      const socketArgs = { id: args.accessory_id };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("get_accessory", socketArgs);
     }
     case "search": {
       if (!args.query) throw new Error("query is required for search action");
       const socketArgs = { query: args.query };
+      if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.category) socketArgs.category = args.category;
       return sendCommand("search", socketArgs);
     }
@@ -20875,11 +20878,13 @@ async function handleAccessories(args) {
       if (!args.accessory_id) throw new Error("accessory_id is required for control action");
       if (!args.characteristic) throw new Error("characteristic is required for control action");
       if (!args.value) throw new Error("value is required for control action");
-      return sendCommand("control", {
+      const socketArgs = {
         id: args.accessory_id,
         characteristic: args.characteristic,
         value: args.value
-      });
+      };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("control", socketArgs);
     }
     default:
       throw new Error(`Unknown accessories action: ${action}`);
@@ -20900,7 +20905,9 @@ async function handleScenes(args) {
     }
     case "trigger": {
       if (!args.scene_id) throw new Error("scene_id is required for trigger action");
-      return sendCommand("trigger_scene", { id: args.scene_id });
+      const socketArgs = { id: args.scene_id };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("trigger_scene", socketArgs);
     }
     default:
       throw new Error(`Unknown scenes action: ${action}`);

@@ -15,11 +15,10 @@ enum AccessoryModel {
     }
 
     /// Summary of a room (accessories populated separately by caller with cache-aware logic).
-    static func roomSummary(_ room: HMRoom, homeID: UUID) -> [String: Any] {
+    static func roomSummary(_ room: HMRoom) -> [String: Any] {
         [
             "id": room.uniqueIdentifier.uuidString,
             "name": room.name,
-            "home_id": homeID.uuidString,
             "accessory_count": room.accessories.count,
         ]
     }
@@ -35,9 +34,7 @@ enum AccessoryModel {
         cachedState: [String: String]? = nil,
         zone: String? = nil,
         displayName: String? = nil,
-        semanticType: String? = nil,
-        homeName: String? = nil,
-        homeID: String? = nil
+        semanticType: String? = nil
     ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": accessory.uniqueIdentifier.uuidString,
@@ -54,8 +51,6 @@ enum AccessoryModel {
         if let displayName, displayName != accessory.name { dict["display_name"] = displayName }
         if let semanticType { dict["semantic_type"] = semanticType }
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
-        if let homeName { dict["home"] = homeName }
-        if let homeID { dict["home_id"] = homeID }
 
         // Use cached state if provided, otherwise read from characteristic objects
         let state: [String: String]
@@ -83,7 +78,7 @@ enum AccessoryModel {
     }
 
     /// Full detail of an accessory (for get views).
-    static func accessoryDetail(_ accessory: HMAccessory, homeName: String? = nil, homeID: String? = nil) -> [String: Any] {
+    static func accessoryDetail(_ accessory: HMAccessory) -> [String: Any] {
         var dict: [String: Any] = [
             "id": accessory.uniqueIdentifier.uuidString,
             "name": accessory.name,
@@ -98,8 +93,6 @@ enum AccessoryModel {
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
         if let model = accessory.model { dict["model"] = model }
         if let firmware = accessory.firmwareVersion { dict["firmware"] = firmware }
-        if let homeName { dict["home"] = homeName }
-        if let homeID { dict["home_id"] = homeID }
 
         // Services and their characteristics
         var services: [[String: Any]] = []
@@ -141,11 +134,10 @@ enum AccessoryModel {
     }
 
     /// Summary of a scene (action set).
-    static func sceneSummary(_ actionSet: HMActionSet, homeID: UUID) -> [String: Any] {
+    static func sceneSummary(_ actionSet: HMActionSet) -> [String: Any] {
         [
             "id": actionSet.uniqueIdentifier.uuidString,
             "name": actionSet.name,
-            "home_id": homeID.uuidString,
             "action_count": actionSet.actions.count,
             "type": actionSetType(actionSet),
         ]

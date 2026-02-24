@@ -6,10 +6,10 @@ struct Config: ParsableCommand {
         abstract: "View or update HomeKit Bridge configuration"
     )
 
-    @Option(name: .long, help: "Set default home by name or UUID (use 'none' to clear)")
+    @Option(name: .long, help: "Set active home by name or UUID")
     var defaultHome: String?
 
-    @Flag(name: .long, help: "Clear default home setting")
+    @Flag(name: .long, help: "Reset default home to primary home")
     var clear = false
 
     @Option(name: .long, help: "Set filter mode: 'all' or 'allowlist'")
@@ -32,9 +32,22 @@ struct Config: ParsableCommand {
         }
 
         if clear {
+            // Find the primary home and set it as default
+            let homesResponse = try SocketClient.send(command: "list_homes")
+            var primaryID: String?
+            if let homesList = homesResponse.data?.value as? [[String: Any]] {
+                if let primary = homesList.first(where: { $0["is_primary"] as? Bool == true }) {
+                    primaryID = primary["id"] as? String
+                } else if let first = homesList.first {
+                    primaryID = first["id"] as? String
+                }
+            }
+            guard let homeID = primaryID else {
+                throw ValidationError("No homes available")
+            }
             let response = try SocketClient.send(
                 command: "set_config",
-                args: ["default_home_id": ""]
+                args: ["default_home_id": homeID]
             )
             guard response.success else {
                 throw ValidationError(response.error ?? "Unknown error")
@@ -42,7 +55,7 @@ struct Config: ParsableCommand {
             if json {
                 printJSON(response.data?.value)
             } else {
-                print("Default home cleared. All homes will be queried.")
+                print("Active home reset to primary home.")
             }
             return
         }
@@ -103,21 +116,29 @@ struct Config: ParsableCommand {
 
         print("HomeKit Bridge Configuration")
         print("  Config file:   ~/.config/homekit-bridge/config.json")
-        if let defaultID {
-            print("  Default home:  \(defaultID)")
+
+        // Resolve active home name from available homes
+        let homes = data["available_homes"] as? [[String: Any]] ?? []
+        let activeHome = homes.first(where: { ($0["is_selected"] as? Bool) == true })
+        let activeName = activeHome?["name"] as? String
+        if let activeName {
+            print("  Active home:   \(activeName)")
+        } else if let defaultID {
+            print("  Active home:   \(defaultID)")
         } else {
-            print("  Default home:  (none \u{2014} all homes queried)")
+            print("  Active home:   (primary home)")
         }
         print("  Filter mode:   \(mode)")
         print("  Accessories:   \(filteredCount) of \(totalCount) exposed")
 
-        if let homes = data["available_homes"] as? [[String: Any]], !homes.isEmpty {
+        if !homes.isEmpty {
             print("\nAvailable homes:")
             for home in homes {
                 let name = home["name"] as? String ?? "Unknown"
                 let id = home["id"] as? String ?? "?"
                 let accessories = home["accessory_count"] as? Int ?? 0
-                let marker = (id == defaultID) ? " *" : ""
+                let isSelected = home["is_selected"] as? Bool ?? false
+                let marker = isSelected ? " *" : ""
                 print("  \(name) (\(accessories) accessories) [\(id)]\(marker)")
             }
         }

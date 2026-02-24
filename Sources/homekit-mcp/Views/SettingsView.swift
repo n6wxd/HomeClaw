@@ -166,21 +166,20 @@ private struct HomeKitSettingsView: View {
                         }
                     }
 
-                    Section("Default Home") {
-                        Picker("Default Home", selection: $selectedDefaultHome) {
-                            Text("All Homes").tag("")
+                    Section("Active Home") {
+                        Picker("Active Home", selection: $selectedDefaultHome) {
                             ForEach(homes) { home in
                                 Text(home.name).tag(home.id)
                             }
                         }
                         .onChange(of: selectedDefaultHome) { _, newValue in
+                            guard !newValue.isEmpty else { return }
                             Task {
-                                let homeID = newValue.isEmpty ? nil : newValue
-                                _ = try? await HomeKitClient.shared.setConfig(defaultHomeID: homeID)
+                                _ = try? await HomeKitClient.shared.setConfig(defaultHomeID: newValue)
                             }
                         }
 
-                        Text("When set, only accessories from the selected home are shown.")
+                        Text("All commands operate on the selected home. Use the MCP or CLI to switch homes.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -220,9 +219,14 @@ private struct HomeKitSettingsView: View {
             let configData = try await HomeKitClient.shared.getConfig()
             if let configDict = try? JSONSerialization.jsonObject(with: configData) as? [String: Any],
                let config = configDict["config"] as? [String: Any],
-               let defaultID = config["default_home_id"] as? String
+               let defaultID = config["default_home_id"] as? String,
+               !defaultID.isEmpty
             {
                 selectedDefaultHome = defaultID
+            } else if !homes.isEmpty {
+                // No default configured — auto-select first home and persist it
+                selectedDefaultHome = homes[0].id
+                _ = try? await HomeKitClient.shared.setConfig(defaultHomeID: selectedDefaultHome)
             }
         } catch {
             errorMessage = "Helper not running"
