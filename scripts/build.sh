@@ -234,6 +234,16 @@ if [[ -f "$PROJECT_ROOT/Resources/HomeClaw.icns" ]]; then
     cp "$PROJECT_ROOT/Resources/HomeClaw.icns" "$APP_BUNDLE/Contents/Resources/HomeClaw.icns"
 fi
 
+# Bundle stdio MCP server (self-contained Node.js script for Claude Desktop integration)
+MCP_SERVER_JS="$PROJECT_ROOT/mcp-server/dist/server.js"
+if [[ ! -f "$MCP_SERVER_JS" ]] && command -v node &>/dev/null && [[ -f "$PROJECT_ROOT/node_modules/.package-lock.json" ]]; then
+    # Build if not already built and npm dependencies are installed
+    npm run --prefix "$PROJECT_ROOT" build:mcp 2>/dev/null || true
+fi
+if [[ -f "$MCP_SERVER_JS" ]]; then
+    cp "$MCP_SERVER_JS" "$APP_BUNDLE/Contents/Resources/mcp-server.js"
+fi
+
 # Copy main executable
 cp "$SPM_BUILD_DIR/homekit-mcp" "$APP_BUNDLE/Contents/MacOS/homekit-mcp"
 

@@ -1,9 +1,6 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct IntegrationsSettingsView: View {
-    /// Path to the built mcp-server/dist/server.js (for Claude Desktop stdio transport).
-    @AppStorage("mcpServerJSPath") private var serverJSPath = ""
     @AppStorage(AppConfig.portKey) private var port = AppConfig.defaultPort
 
     @State private var claudeDesktopStatus: IntegrationStatus = .checking
@@ -15,6 +12,7 @@ struct IntegrationsSettingsView: View {
         case notInstalled
         case installed
         case tokenMismatch
+        case nodeNotFound
     }
 
     private static let serverName = "homekit-bridge"
@@ -28,6 +26,12 @@ struct IntegrationsSettingsView: View {
         FileManager.default.homeDirectoryForCurrentUser.path + "/.claude.json"
     }
 
+    /// Path to the bundled mcp-server.js inside the app's Resources.
+    private static var bundledServerJSPath: String? {
+        let path = Bundle.main.bundlePath + "/Contents/Resources/mcp-server.js"
+        return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
     var body: some View {
         Form {
             Section("Claude Desktop") {
@@ -35,26 +39,20 @@ struct IntegrationsSettingsView: View {
                     statusLabel(claudeDesktopStatus)
                 }
 
-                LabeledContent("MCP Server") {
-                    HStack(spacing: 4) {
-                        TextField(
-                            "mcp-server/dist/server.js",
-                            text: $serverJSPath
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption, design: .monospaced))
-
-                        Button("Browse\u{2026}") {
-                            browseForServerJS()
-                        }
+                if let path = Self.bundledServerJSPath {
+                    LabeledContent("MCP Server") {
+                        Text(path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
 
                 HStack {
-                    Button(claudeDesktopStatus == .tokenMismatch ? "Update" : "Install") {
+                    Button(claudeDesktopStatus == .installed ? "Reinstall" : "Install") {
                         installClaudeDesktop()
                     }
-                    .disabled(serverJSPath.isEmpty)
+                    .disabled(claudeDesktopStatus == .nodeNotFound)
 
                     if canRemove(claudeDesktopStatus) {
                         Button("Remove", role: .destructive) {
@@ -64,9 +62,19 @@ struct IntegrationsSettingsView: View {
                     }
                 }
 
-                Text("Uses the stdio MCP server. Requires Node.js and the built server.js.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if claudeDesktopStatus == .nodeNotFound {
+                    Text("Node.js is required for Claude Desktop integration. Install from nodejs.org.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if Self.bundledServerJSPath == nil {
+                    Text("MCP server not bundled. Rebuild with: npm run build:mcp && scripts/build.sh")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("Uses the bundled stdio MCP server. Requires Node.js.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Claude Code") {
@@ -81,7 +89,7 @@ struct IntegrationsSettingsView: View {
                 }
 
                 HStack {
-                    Button(claudeCodeStatus == .tokenMismatch ? "Update" : "Install") {
+                    Button(installButtonLabel(claudeCodeStatus)) {
                         installClaudeCode()
                     }
 
@@ -120,7 +128,6 @@ struct IntegrationsSettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            detectServerJSPath()
             refreshStatuses()
         }
     }
@@ -142,6 +149,17 @@ struct IntegrationsSettingsView: View {
         case .tokenMismatch:
             Label("Token Outdated", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
+        case .nodeNotFound:
+            Label("Node.js Not Found", systemImage: "xmark.circle")
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func installButtonLabel(_ status: IntegrationStatus) -> String {
+        switch status {
+        case .tokenMismatch: "Update"
+        case .installed: "Reinstall"
+        default: "Install"
         }
     }
 
@@ -156,8 +174,10 @@ struct IntegrationsSettingsView: View {
         claudeCodeStatus = checkClaudeCodeStatus()
     }
 
-    /// Claude Desktop uses stdio — no token to compare, just check entry exists.
     private func checkClaudeDesktopStatus() -> IntegrationStatus {
+        // Check Node.js availability first
+        guard nodeJSPath() != nil else { return .nodeNotFound }
+
         guard let config = readConfig(at: Self.claudeDesktopConfigPath),
             let servers = config["mcpServers"] as? [String: Any],
             servers[Self.serverName] != nil
@@ -167,7 +187,6 @@ struct IntegrationsSettingsView: View {
         return .installed
     }
 
-    /// Claude Code uses HTTP with bearer token — check entry exists and token matches.
     private func checkClaudeCodeStatus() -> IntegrationStatus {
         guard let config = readConfig(at: Self.claudeCodeConfigPath),
             let servers = config["mcpServers"] as? [String: Any],
@@ -176,7 +195,6 @@ struct IntegrationsSettingsView: View {
             return .notInstalled
         }
 
-        // Compare configured token with current keychain token
         if let currentToken = currentToken(),
             let configToken = extractBearerToken(from: config)
         {
@@ -199,16 +217,19 @@ struct IntegrationsSettingsView: View {
     // MARK: - Install
 
     private func installClaudeDesktop() {
-        guard !serverJSPath.isEmpty else { return }
+        guard let serverJS = Self.bundledServerJSPath else {
+            showStatus("MCP server not bundled in app — rebuild first", isError: true)
+            return
+        }
 
-        guard FileManager.default.fileExists(atPath: serverJSPath) else {
-            showStatus("Server file not found — run: npm run build:mcp", isError: true)
+        guard let nodePath = nodeJSPath() else {
+            showStatus("Node.js not found — install from nodejs.org", isError: true)
             return
         }
 
         let entry: [String: Any] = [
-            "command": "node",
-            "args": [serverJSPath],
+            "command": nodePath,
+            "args": [serverJS],
         ]
 
         do {
@@ -266,13 +287,11 @@ struct IntegrationsSettingsView: View {
 
     // MARK: - Config File I/O
 
-    /// Reads an existing JSON config file, or returns nil if missing/invalid.
     private func readConfig(at path: String) -> [String: Any]? {
         guard let data = FileManager.default.contents(atPath: path) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    /// Writes a JSON config file, creating the parent directory if needed.
     private func writeConfig(_ config: [String: Any], to path: String) throws {
         let dir = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(
@@ -282,7 +301,6 @@ struct IntegrationsSettingsView: View {
         try data.write(to: URL(fileURLWithPath: path))
     }
 
-    /// Adds or updates the homekit-bridge entry in an MCP config file.
     private func upsertMCPServer(entry: [String: Any], in configPath: String) throws {
         var config = readConfig(at: configPath) ?? [:]
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
@@ -291,46 +309,20 @@ struct IntegrationsSettingsView: View {
         try writeConfig(config, to: configPath)
     }
 
-    // MARK: - Path Detection
-
-    /// Auto-detect the mcp-server/dist/server.js path from common locations.
-    private func detectServerJSPath() {
-        guard serverJSPath.isEmpty else { return }
-
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
-            // Development builds: .build/app/HomeKit Bridge.app → repo root
-            (Bundle.main.bundlePath as NSString)
-                .appendingPathComponent("../../../mcp-server/dist/server.js"),
-            // Common clone location
-            home + "/GitHub/HomeClaw/mcp-server/dist/server.js",
-        ]
-
-        for path in candidates {
-            let resolved = (path as NSString).standardizingPath
-            if FileManager.default.fileExists(atPath: resolved) {
-                serverJSPath = resolved
-                return
-            }
-        }
-    }
-
-    private func browseForServerJS() {
-        let panel = NSOpenPanel()
-        panel.title = "Select mcp-server/dist/server.js"
-        panel.allowedContentTypes = [.javaScript]
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-
-        if panel.runModal() == .OK, let url = panel.url {
-            serverJSPath = url.path
-        }
-    }
-
     // MARK: - Helpers
 
     private func currentToken() -> String? {
         try? KeychainManager.readToken()
+    }
+
+    /// Finds the absolute path to the `node` binary, or nil if not installed.
+    private func nodeJSPath() -> String? {
+        let knownPaths = [
+            "/usr/local/bin/node",
+            "/opt/homebrew/bin/node",
+            "/usr/bin/node",
+        ]
+        return knownPaths.first(where: { FileManager.default.fileExists(atPath: $0) })
     }
 
     private func showStatus(_ text: String, isError: Bool) {
@@ -338,7 +330,6 @@ struct IntegrationsSettingsView: View {
         statusMessage = message
         Task {
             try? await Task.sleep(for: .seconds(3))
-            // Only clear if this is still the active message
             if statusMessage?.id == message.id {
                 statusMessage = nil
             }
