@@ -54,7 +54,7 @@ private struct GeneralSettingsView: View {
                     }
                 }
 
-            Text("HomeKit Bridge v\(AppConfig.version)")
+            Text("HomeKit Bridge v\(AppConfig.version) (\(AppConfig.build))")
                 .foregroundStyle(.secondary)
                 .font(.caption)
         }

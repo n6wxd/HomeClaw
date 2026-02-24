@@ -15,7 +15,7 @@ import {
 } from '../lib/handlers/homekit.js';
 
 const server = new Server(
-  { name: 'homekit-bridge', version: '0.1.0' },
+  { name: 'homekit-bridge', version: '0.0.1' },
   { capabilities: { tools: {} } }
 );
 

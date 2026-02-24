@@ -96,6 +96,12 @@ if [[ -z "$TEAM_ID" || "$TEAM_ID" == "YOUR_TEAM_ID" ]]; then
     exit 1
 fi
 
+# ─── Derive version from git ──────────────────────────────────────────
+
+GIT_TAG=$(git -C "$PROJECT_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "v0.0.1")
+MARKETING_VERSION="${GIT_TAG#v}"
+BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
+
 # ─── Derived paths ──────────────────────────────────────────────────
 
 SPM_BUILD_DIR="$PROJECT_ROOT/.build/$BUILD_CONFIG"
@@ -152,7 +158,7 @@ next_step() { CURRENT_STEP=$((CURRENT_STEP + 1)); }
 # ─── Main ───────────────────────────────────────────────────────────
 
 echo ""
-echo "$(bold "Building $APP_NAME...") ($BUILD_CONFIG)"
+echo "$(bold "Building $APP_NAME...") ($BUILD_CONFIG) v$MARKETING_VERSION build $BUILD_NUMBER"
 echo ""
 
 # Clean if requested
@@ -206,6 +212,8 @@ if ! $SKIP_HELPER; then
         -derivedDataPath "$DERIVED_DATA" \
         -allowProvisioningUpdates \
         DEVELOPMENT_TEAM="$TEAM_ID" \
+        MARKETING_VERSION="$MARKETING_VERSION" \
+        CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
         ONLY_ACTIVE_ARCH=NO \
         -quiet 2>/dev/null; then
         step_done
@@ -226,8 +234,10 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Helpers"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Copy Info.plist
+# Copy Info.plist and inject git-derived version + build number
 cp "$PROJECT_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
 
 # Copy app icon
 if [[ -f "$PROJECT_ROOT/Resources/HomeClaw.icns" ]]; then
@@ -344,6 +354,7 @@ fi
 
 echo ""
 echo "$(bold "Output:") $APP_BUNDLE"
+echo "$(bold "Version:") $MARKETING_VERSION ($BUILD_NUMBER)"
 echo ""
 
 # Verify code signature

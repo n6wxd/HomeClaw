@@ -1,6 +1,6 @@
 {
   "name": "homekit-bridge",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "description": "HomeKit Bridge — MCP server and CLI for HomeKit smart home control",
   "type": "module",

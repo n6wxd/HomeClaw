@@ -1,6 +1,6 @@
 {
   "name": "homekit-bridge",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
   "author": {
     "name": "Omar Shahine"
