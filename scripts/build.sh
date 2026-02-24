@@ -239,8 +239,19 @@ if [[ -f "$MCP_SERVER_JS" ]]; then
     cp "$MCP_SERVER_JS" "$APP_BUNDLE/Contents/Resources/mcp-server.js"
 fi
 
-# Copy main executable
+# Bundle OpenClaw plugin files (for one-click install from Settings)
+OPENCLAW_SRC="$PROJECT_ROOT/openclaw"
+if [[ -d "$OPENCLAW_SRC" ]]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/openclaw"
+    cp "$OPENCLAW_SRC/openclaw.plugin.json" "$APP_BUNDLE/Contents/Resources/openclaw/"
+    cp "$OPENCLAW_SRC/package.json" "$APP_BUNDLE/Contents/Resources/openclaw/"
+    cp -R "$OPENCLAW_SRC/src" "$APP_BUNDLE/Contents/Resources/openclaw/src"
+    cp -R "$OPENCLAW_SRC/skills" "$APP_BUNDLE/Contents/Resources/openclaw/skills"
+fi
+
+# Copy main executable and CLI binary
 cp "$SPM_BUILD_DIR/homekit-mcp" "$APP_BUNDLE/Contents/MacOS/homekit-mcp"
+cp "$SPM_BUILD_DIR/homekit-cli" "$APP_BUNDLE/Contents/MacOS/homekit-cli"
 
 # Copy HomeKitHelper.app (entire bundle)
 if ! $SKIP_HELPER; then
@@ -285,6 +296,9 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
         "$APP_BUNDLE/Contents/MacOS/homekit-mcp" 2>/dev/null
 
     codesign "${CODESIGN_FLAGS[@]}" \
+        "$APP_BUNDLE/Contents/MacOS/homekit-cli" 2>/dev/null
+
+    codesign "${CODESIGN_FLAGS[@]}" \
         --entitlements "$MAIN_ENTITLEMENTS" \
         "$APP_BUNDLE" 2>/dev/null
 
@@ -323,12 +337,13 @@ if $DO_INSTALL; then
     cp -R "$APP_BUNDLE" "/Applications/$APP_NAME.app"
     echo "  Installed: /Applications/$APP_NAME.app"
 
-    # Symlink CLI to /usr/local/bin (may need sudo)
-    if ln -sf "$SPM_BUILD_DIR/homekit-cli" /usr/local/bin/homekit-cli 2>/dev/null; then
-        echo "  CLI linked: /usr/local/bin/homekit-cli"
+    # Symlink CLI to /usr/local/bin (points to bundled binary in the app)
+    BUNDLED_CLI="/Applications/$APP_NAME.app/Contents/MacOS/homekit-cli"
+    if ln -sf "$BUNDLED_CLI" /usr/local/bin/homekit-cli 2>/dev/null; then
+        echo "  CLI linked: /usr/local/bin/homekit-cli -> $BUNDLED_CLI"
     else
         echo "  CLI symlink needs elevated permissions. Run:"
-        echo "    sudo ln -sf '$SPM_BUILD_DIR/homekit-cli' /usr/local/bin/homekit-cli"
+        echo "    sudo ln -sf '$BUNDLED_CLI' /usr/local/bin/homekit-cli"
     fi
 
     echo ""

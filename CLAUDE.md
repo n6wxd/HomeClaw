@@ -45,6 +45,13 @@ openclaw/                # HomeClaw — OpenClaw plugin for Claude Code
   openclaw.plugin.json   # Plugin manifest (configurable binDir)
   src/index.ts           # Plugin entry point
   skills/homekit/        # HomeKit skill definition
+
+App bundle layout (after build):
+  Contents/MacOS/homekit-mcp     # Main app executable
+  Contents/MacOS/homekit-cli     # Bundled CLI binary
+  Contents/Helpers/HomeKitHelper.app  # Catalyst helper
+  Contents/Resources/mcp-server.js    # Node.js stdio MCP server
+  Contents/Resources/openclaw/        # Bundled OpenClaw plugin files
 ```
 
 ## Build System

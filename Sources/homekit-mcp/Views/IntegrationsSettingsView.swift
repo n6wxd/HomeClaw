@@ -6,6 +6,7 @@ struct IntegrationsSettingsView: View {
     @State private var claudeDesktopStatus: DesktopStatus = .checking
     @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
     @State private var openClawStatus: OpenClawStatus = .checking
+    @State private var cliStatus: CLIStatus = .checking
     @State private var statusMessage: StatusMessage?
 
     // MARK: - Status Enums
@@ -28,14 +29,22 @@ struct IntegrationsSettingsView: View {
         case notInstalled
     }
 
+    private enum CLIStatus {
+        case checking
+        /// Symlink exists and points to bundled binary.
+        case installed
+        /// Symlink missing or points elsewhere.
+        case notInstalled
+    }
+
     private enum OpenClawStatus {
         case checking
         /// ~/.openclaw/ directory doesn't exist.
         case openClawNotDetected
-        /// OpenClaw config exists but homeclaw plugin not found.
-        case notConfigured
-        /// Plugin found in OpenClaw config (allow list, entries, or load paths).
-        case configured
+        /// OpenClaw present but plugin not installed.
+        case notInstalled
+        /// Plugin found in extensions directory or OpenClaw config.
+        case installed
     }
 
     // MARK: - Constants & Paths
@@ -44,6 +53,10 @@ struct IntegrationsSettingsView: View {
     private static let pluginPrefix = "homekit-bridge@"
     private static let githubRepo = "omarshahine/HomeClaw"
     private static let openClawPluginID = "homeclaw"
+    private static let cliSymlinkPath = "/usr/local/bin/homekit-cli"
+    private static var bundledCLIPath: String {
+        Bundle.main.bundlePath + "/Contents/MacOS/homekit-cli"
+    }
 
     private static var claudeDesktopConfigPath: String {
         FileManager.default.homeDirectoryForCurrentUser.path
@@ -68,10 +81,25 @@ struct IntegrationsSettingsView: View {
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
+    /// Path to the bundled OpenClaw plugin directory inside the app's Resources.
+    private static var bundledOpenClawPluginPath: String? {
+        let path = Bundle.main.bundlePath + "/Contents/Resources/openclaw"
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+            ? path : nil
+    }
+
+    /// Path to the installed OpenClaw plugin in the extensions directory.
+    private static var openClawExtensionsPath: String {
+        FileManager.default.homeDirectoryForCurrentUser.path
+            + "/.openclaw/extensions/homeclaw"
+    }
+
     // MARK: - Body
 
     var body: some View {
         Form {
+            cliSection
             claudeDesktopSection
             claudeCodeSection
             openClawSection
@@ -99,6 +127,57 @@ struct IntegrationsSettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             refreshStatuses()
+        }
+    }
+
+    // MARK: - CLI Section
+
+    @ViewBuilder
+    private var cliSection: some View {
+        Section("Command Line") {
+            LabeledContent("Status") {
+                cliStatusLabel
+            }
+
+            if cliStatus == .installed {
+                LabeledContent("Path") {
+                    Text(Self.cliSymlinkPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            HStack {
+                Button(cliStatus == .installed ? "Reinstall" : "Install") {
+                    installCLISymlink()
+                }
+
+                if cliStatus == .installed {
+                    Button("Remove", role: .destructive) {
+                        removeCLISymlink()
+                    }
+                }
+            }
+
+            Text("Creates a symlink at \(Self.cliSymlinkPath) pointing to the bundled binary. Requires administrator privileges.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var cliStatusLabel: some View {
+        switch cliStatus {
+        case .checking:
+            Label("Checking\u{2026}", systemImage: "circle.dotted")
+                .foregroundStyle(.secondary)
+        case .installed:
+            Label("Installed", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .notInstalled:
+            Label("Not Installed", systemImage: "circle")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -228,20 +307,51 @@ struct IntegrationsSettingsView: View {
             }
 
             switch openClawStatus {
-            case .configured:
-                Text("HomeClaw plugin is configured on the OpenClaw gateway.")
+            case .installed:
+                Text("HomeClaw plugin is installed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-            case .notConfigured:
+                Button("Remove", role: .destructive) {
+                    removeOpenClawPlugin()
+                }
+
+            case .notInstalled:
+                if openClawCLIPath() != nil {
+                    HStack {
+                        Button("Install") {
+                            installOpenClawPlugin()
+                        }
+                        .disabled(Self.bundledOpenClawPluginPath == nil)
+
+                        Button("Copy Setup Instructions") {
+                            copyOpenClawSetupInstructions()
+                        }
+                    }
+
+                    if Self.bundledOpenClawPluginPath == nil {
+                        Text("Plugin not bundled. Rebuild with: scripts/build.sh")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Installs the bundled HomeClaw plugin into OpenClaw.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button("Copy Setup Instructions") {
+                        copyOpenClawSetupInstructions()
+                    }
+
+                    openClawRemoteInstructionsView
+                }
+
+            case .openClawNotDetected:
                 Button("Copy Setup Instructions") {
                     copyOpenClawSetupInstructions()
                 }
 
-                openClawInstructionsView
-
-            case .openClawNotDetected:
-                Text("OpenClaw not detected. Install OpenClaw and configure your gateway first.")
+                Text("OpenClaw not detected locally. Use the setup instructions for a remote gateway.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -252,33 +362,19 @@ struct IntegrationsSettingsView: View {
     }
 
     @ViewBuilder
-    private var openClawInstructionsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("On your OpenClaw gateway:")
+    private var openClawRemoteInstructionsView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("OpenClaw CLI not found locally. For a remote gateway:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("# 1. Clone the repo")
-                    .foregroundStyle(.tertiary)
-                Text("git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw")
-                Text("")
-                Text("# 2. Add to openclaw.json plugins section")
-                    .foregroundStyle(.tertiary)
-                Text("plugins.allow: [\"homeclaw\"]")
-                Text("plugins.load.paths: [\"~/GitHub/HomeClaw/openclaw\"]")
-                Text("plugins.entries.homeclaw: { \"enabled\": true }")
-                Text("")
-                Text("# 3. Restart the gateway")
-                    .foregroundStyle(.tertiary)
+                Text("openclaw plugins install <path-to-openclaw-dir>")
+                Text("openclaw plugins enable homeclaw")
             }
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
-
-            Text("The plugin discovers homekit-cli via standard paths. Ensure the CLI is accessible from the gateway.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -326,11 +422,11 @@ struct IntegrationsSettingsView: View {
         case .checking:
             Label("Checking\u{2026}", systemImage: "circle.dotted")
                 .foregroundStyle(.secondary)
-        case .configured:
-            Label("Configured", systemImage: "checkmark.circle.fill")
+        case .installed:
+            Label("Installed", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-        case .notConfigured:
-            Label("Not Configured", systemImage: "circle")
+        case .notInstalled:
+            Label("Not Installed", systemImage: "circle")
                 .foregroundStyle(.secondary)
         case .openClawNotDetected:
             Label("OpenClaw Not Detected", systemImage: "circle")
@@ -341,6 +437,7 @@ struct IntegrationsSettingsView: View {
     // MARK: - Status Checking
 
     private func refreshStatuses() {
+        cliStatus = checkCLIStatus()
         claudeDesktopStatus = checkClaudeDesktopStatus()
         claudeCodeStatus = checkClaudeCodeStatus()
         openClawStatus = checkOpenClawStatus()
@@ -390,38 +487,88 @@ struct IntegrationsSettingsView: View {
             return .openClawNotDetected
         }
 
-        guard let config = readConfig(at: Self.openClawConfigPath),
+        // Check extensions directory (installed via `openclaw plugins install`)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: Self.openClawExtensionsPath, isDirectory: &isDir),
+            isDir.boolValue
+        {
+            return .installed
+        }
+
+        // Check openclaw.json config (legacy manual setup)
+        if let config = readConfig(at: Self.openClawConfigPath),
             let plugins = config["plugins"] as? [String: Any]
-        else {
-            return .notConfigured
-        }
-
-        // Check allow list
-        if let allow = plugins["allow"] as? [String],
-            allow.contains(Self.openClawPluginID)
         {
-            return .configured
+            // Check allow list
+            if let allow = plugins["allow"] as? [String],
+                allow.contains(Self.openClawPluginID)
+            {
+                return .installed
+            }
+
+            // Check entries
+            if let entries = plugins["entries"] as? [String: Any],
+                entries[Self.openClawPluginID] != nil
+            {
+                return .installed
+            }
+
+            // Check load paths for HomeClaw/openclaw
+            if let load = plugins["load"] as? [String: Any],
+                let paths = load["paths"] as? [String],
+                paths.contains(where: { $0.contains("HomeClaw") })
+            {
+                return .installed
+            }
         }
 
-        // Check entries
-        if let entries = plugins["entries"] as? [String: Any],
-            entries[Self.openClawPluginID] != nil
+        return .notInstalled
+    }
+
+    private func checkCLIStatus() -> CLIStatus {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: Self.cliSymlinkPath) else { return .notInstalled }
+
+        // Verify it's a symlink pointing to our bundled binary
+        if let dest = try? fm.destinationOfSymbolicLink(atPath: Self.cliSymlinkPath),
+            dest == Self.bundledCLIPath
         {
-            return .configured
+            return .installed
         }
 
-        // Check load paths for HomeClaw/openclaw
-        if let load = plugins["load"] as? [String: Any],
-            let paths = load["paths"] as? [String],
-            paths.contains(where: { $0.contains("HomeClaw") })
-        {
-            return .configured
-        }
-
-        return .notConfigured
+        // Symlink exists but points elsewhere — treat as not installed (ours)
+        return .notInstalled
     }
 
     // MARK: - Install Actions
+
+    private func installCLISymlink() {
+        let script = """
+            do shell script "ln -sf '\(Self.bundledCLIPath)' '\(Self.cliSymlinkPath)'" \
+            with administrator privileges
+            """
+        if runAppleScript(script) {
+            cliStatus = .installed
+            showStatus("CLI installed at \(Self.cliSymlinkPath)", isError: false)
+            AppLogger.app.info("Installed CLI symlink to \(Self.cliSymlinkPath)")
+        } else {
+            showStatus("CLI install cancelled or failed", isError: true)
+        }
+    }
+
+    private func removeCLISymlink() {
+        let script = """
+            do shell script "rm '\(Self.cliSymlinkPath)'" \
+            with administrator privileges
+            """
+        if runAppleScript(script) {
+            cliStatus = .notInstalled
+            showStatus("CLI symlink removed", isError: false)
+            AppLogger.app.info("Removed CLI symlink")
+        } else {
+            showStatus("CLI removal cancelled or failed", isError: true)
+        }
+    }
 
     private func installClaudeDesktop() {
         guard let serverJS = Self.bundledServerJSPath else {
@@ -462,18 +609,66 @@ struct IntegrationsSettingsView: View {
     }
 
     private func copyOpenClawSetupInstructions() {
+        let bundledPath = Self.bundledOpenClawPluginPath
+            ?? "/Applications/HomeKit Bridge.app/Contents/Resources/openclaw"
         let instructions = """
-            # Clone HomeClaw on the gateway
-            git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw
+            # Install from the bundled plugin (if OpenClaw runs on the same Mac):
+            openclaw plugins install "\(bundledPath)"
+            openclaw plugins enable homeclaw
 
-            # Add to openclaw.json plugins section:
-            # plugins.allow: add "homeclaw"
-            # plugins.load.paths: add "~/GitHub/HomeClaw/openclaw"
-            # plugins.entries.homeclaw: { "enabled": true }
+            # Or for a remote gateway, clone the repo:
+            git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw
+            openclaw plugins install ~/GitHub/HomeClaw/openclaw
+            openclaw plugins enable homeclaw
             """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(instructions, forType: .string)
         showStatus("Setup instructions copied to clipboard", isError: false)
+    }
+
+    private func installOpenClawPlugin() {
+        guard let pluginPath = Self.bundledOpenClawPluginPath else {
+            showStatus("Plugin not bundled in app — rebuild first", isError: true)
+            return
+        }
+
+        guard let cliPath = openClawCLIPath() else {
+            showStatus("OpenClaw CLI not found", isError: true)
+            return
+        }
+
+        // Run: openclaw plugins install <bundledPlugin>
+        let installResult = runProcess(cliPath, arguments: ["plugins", "install", pluginPath])
+        guard installResult.success else {
+            showStatus("Install failed: \(installResult.output)", isError: true)
+            return
+        }
+
+        // Run: openclaw plugins enable homeclaw
+        let enableResult = runProcess(cliPath, arguments: ["plugins", "enable", Self.openClawPluginID])
+        if enableResult.success {
+            openClawStatus = .installed
+            showStatus("HomeClaw plugin installed in OpenClaw", isError: false)
+            AppLogger.app.info("Installed OpenClaw plugin from bundled path")
+        } else {
+            showStatus("Enable failed: \(enableResult.output)", isError: true)
+        }
+    }
+
+    private func removeOpenClawPlugin() {
+        guard let cliPath = openClawCLIPath() else {
+            showStatus("OpenClaw CLI not found — remove manually", isError: true)
+            return
+        }
+
+        let result = runProcess(cliPath, arguments: ["plugins", "disable", Self.openClawPluginID])
+        if result.success {
+            openClawStatus = .notInstalled
+            showStatus("HomeClaw plugin removed from OpenClaw", isError: false)
+            AppLogger.app.info("Removed OpenClaw plugin")
+        } else {
+            showStatus("Remove failed: \(result.output)", isError: true)
+        }
     }
 
     // MARK: - Remove
@@ -531,6 +726,47 @@ struct IntegrationsSettingsView: View {
             "/usr/bin/node",
         ]
         return knownPaths.first(where: { FileManager.default.fileExists(atPath: $0) })
+    }
+
+    /// Finds the absolute path to the `openclaw` binary, or nil if not installed.
+    private func openClawCLIPath() -> String? {
+        let knownPaths = [
+            "/usr/local/bin/openclaw",
+            "/opt/homebrew/bin/openclaw",
+        ]
+        return knownPaths.first(where: { FileManager.default.fileExists(atPath: $0) })
+    }
+
+    /// Runs an AppleScript string. Returns true on success.
+    /// Used for privileged operations that show the macOS admin password prompt.
+    @discardableResult
+    private func runAppleScript(_ source: String) -> Bool {
+        guard let script = NSAppleScript(source: source) else { return false }
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        return error == nil
+    }
+
+    /// Runs a process synchronously and returns the combined output.
+    private func runProcess(_ path: String, arguments: [String]) -> (success: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return (false, error.localizedDescription)
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (process.terminationStatus == 0, output)
     }
 
     private func showStatus(_ text: String, isError: Bool) {

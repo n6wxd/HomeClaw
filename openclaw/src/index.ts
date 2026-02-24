@@ -7,7 +7,7 @@
  * Binary discovery order:
  * 1. Plugin config `binDir`
  * 2. HOMEKIT_BRIDGE_BIN_DIR environment variable
- * 3. PATH lookup (which homekit-cli)
+ * 3. App bundle (/Applications/HomeKit Bridge.app/Contents/MacOS/)
  * 4. Standard locations (~/.local/bin/, /usr/local/bin/)
  * 5. Build output (.build/debug/, .build/release/)
  */
@@ -31,10 +31,11 @@ export function discoverBinary(configBinDir?: string): string | null {
   // 3. Standard locations
   const home = process.env.HOME || '';
   candidates.push(
+    '/Applications/HomeKit Bridge.app/Contents/MacOS/homekit-cli',
     `${home}/.local/bin/homekit-cli`,
     '/usr/local/bin/homekit-cli',
-    `${home}/GitHub/HomeKitBridge/.build/debug/homekit-cli`,
-    `${home}/GitHub/HomeKitBridge/.build/release/homekit-cli`,
+    `${home}/GitHub/HomeClaw/.build/debug/homekit-cli`,
+    `${home}/GitHub/HomeClaw/.build/release/homekit-cli`,
   );
 
   // Check existence (would be done at runtime)

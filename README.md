@@ -248,36 +248,39 @@ curl -s http://localhost:9090/mcp \
 
 ## Using with OpenClaw
 
-HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers HomeKit tools on the gateway. Since OpenClaw typically runs on a remote machine, setup requires cloning the repo and configuring the plugin on your gateway.
+HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers HomeKit tools on the gateway.
 
-### Gateway Setup
+### Same-Mac Install (Recommended)
 
-On your OpenClaw gateway:
+If HomeKit Bridge and OpenClaw run on the same Mac, use the one-click installer:
+
+1. Open **Settings > Integrations** and click **Install** in the OpenClaw section.
+
+Or from the terminal:
 
 ```bash
-# Clone the repo
+openclaw plugins install "/Applications/HomeKit Bridge.app/Contents/Resources/openclaw/"
+openclaw plugins enable homeclaw
+```
+
+The plugin files and `homekit-cli` binary are bundled inside the app -- no git clone needed.
+
+### Remote Gateway
+
+If OpenClaw runs on a different machine:
+
+```bash
+# Clone the repo on the gateway
 git clone https://github.com/omarshahine/HomeClaw.git ~/GitHub/HomeClaw
+
+# Install the plugin
+openclaw plugins install ~/GitHub/HomeClaw/openclaw
+openclaw plugins enable homeclaw
 ```
 
-Add the plugin to your `openclaw.json`:
-
-```json5
-{
-  plugins: {
-    allow: ["homeclaw"],
-    load: { paths: ["~/GitHub/HomeClaw/openclaw"] },
-    entries: {
-      homeclaw: { enabled: true }
-    }
-  }
-}
-```
-
-Restart the gateway to load the plugin. The plugin discovers `homekit-cli` via standard paths (`/usr/local/bin/homekit-cli`, `~/.local/bin/`, build output directories).
+The plugin discovers `homekit-cli` via standard paths (`/Applications/HomeKit Bridge.app/Contents/MacOS/homekit-cli`, `/usr/local/bin/homekit-cli`, `~/.local/bin/`, build output directories).
 
 > **Note:** The `homekit-cli` binary must be accessible from the gateway, and the HomeKit Bridge app must be running on a Mac reachable via the Unix socket at `/tmp/homekit-bridge.sock`.
-
-The Integrations tab in Settings detects the plugin status by reading your local `~/.openclaw/openclaw.json` config.
 
 ## Supported Accessories
 
