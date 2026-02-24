@@ -2,13 +2,13 @@
 
 Control your Apple HomeKit smart home from AI assistants, the terminal, and automation tools.
 
-HomeClaw exposes your HomeKit accessories through three interfaces: an **MCP server** for AI assistants like Claude, a **command-line tool** for scripting, and a **Claude Code plugin** for natural language control. It runs as a lightweight macOS menu bar app.
+HomeClaw exposes your HomeKit accessories through an **MCP server**, a **command-line tool**, and plugins for **Claude Code** and **OpenClaw**. It runs as a lightweight macOS menu bar app.
 
 ## Why HomeClaw?
 
-Apple HomeKit has no public API, no CLI, and no way to integrate with AI assistants or automation pipelines. HomeClaw bridges that gap by running a signed macOS app that talks to HomeKit on your behalf and exposes a clean API surface.
+Apple HomeKit has no public API, no CLI, and no way to integrate with AI assistants or automation pipelines. HomeClaw bridges that gap with a development-signed macOS app that talks to HomeKit on your behalf and exposes a clean API surface.
 
-- Ask Claude to "turn off all the lights" or "set the thermostat to 72"
+- Ask Claude or OpenClaw to "turn off all the lights" or "set the thermostat to 72"
 - Script your smart home from the terminal
 - Build automations that go beyond what the Home app offers
 - Search and control devices by name, room, category, or semantic type
@@ -253,6 +253,39 @@ curl -s http://localhost:9090/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | python3 -m json.tool
 ```
 
+## Using with OpenClaw
+
+HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers HomeKit tools on the gateway. Since OpenClaw typically runs on a remote machine, setup requires cloning the repo and configuring the plugin on your gateway.
+
+### Gateway Setup
+
+On your OpenClaw gateway:
+
+```bash
+# Clone the repo
+git clone https://github.com/omarshahine/HomeClaw.git ~/GitHub/HomeClaw
+```
+
+Add the plugin to your `openclaw.json`:
+
+```json5
+{
+  plugins: {
+    allow: ["homeclaw"],
+    load: { paths: ["~/GitHub/HomeClaw/openclaw"] },
+    entries: {
+      homeclaw: { enabled: true }
+    }
+  }
+}
+```
+
+Restart the gateway to load the plugin. The plugin discovers `homekit-cli` via standard paths (`/usr/local/bin/homekit-cli`, `~/.local/bin/`, build output directories).
+
+> **Note:** The `homekit-cli` binary must be accessible from the gateway, and the HomeKit Bridge app must be running on a Mac reachable via the Unix socket at `/tmp/homekit-bridge.sock`.
+
+The Integrations tab in Settings detects the plugin status by reading your local `~/.openclaw/openclaw.json` config.
+
 ## Supported Accessories
 
 HomeClaw supports the full range of HomeKit accessory categories:
@@ -281,7 +314,7 @@ The menu bar provides at-a-glance status and quick actions:
 
 ## Settings
 
-Four configuration tabs accessible from the menu bar:
+Five configuration tabs accessible from the menu bar:
 
 | Tab | Features |
 |-----|----------|
@@ -289,14 +322,33 @@ Four configuration tabs accessible from the menu bar:
 | **Server** | MCP port (editable), endpoint URL, bearer token reveal/copy/rotate |
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles grouped by room, search, bulk select/deselect |
+| **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
+
+### HomeKit
+
+View connection status, browse your homes, and select which home is active for all MCP and CLI commands.
+
+<p align="center"><img src="docs/images/settings-homekit.png" width="500" alt="HomeKit settings tab"></p>
+
+### Devices
+
+Control which accessories are exposed to MCP clients and the CLI. Switch between **All Accessories** (everything visible) and **Selected Only** (allowlist mode). Accessories are grouped by room with a search filter and room-level toggles for quick bulk selection.
+
+<p align="center"><img src="docs/images/settings-devices.png" width="500" alt="Devices settings tab"></p>
+
+### Integrations
+
+Install and manage connections to AI assistants. The app detects existing configurations and guides you through setup:
+
+- **Claude Desktop** -- one-click install of the bundled stdio MCP server (requires Node.js)
+- **Claude Code** -- detects the installed plugin (`homekit-bridge@homekit-bridge`) or legacy MCP config
+- **OpenClaw** -- detects plugin configuration on the remote gateway and provides setup instructions
+
+<p align="center"><img src="docs/images/settings-integrations.png" width="500" alt="Integrations settings tab"></p>
 
 ## Device Filtering
 
-Control which accessories are exposed to MCP clients and the CLI:
-
-- **All mode** (default) -- every accessory is available
-- **Allowlist mode** -- only selected accessories are exposed
-- Configure via the Devices settings tab (grouped by room with search) or CLI:
+Use the [Devices tab](#devices) in Settings or the CLI to control which accessories are exposed:
 
 ```bash
 homekit-cli config --filter-mode allowlist
