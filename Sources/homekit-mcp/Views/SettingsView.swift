@@ -7,7 +7,7 @@ struct SettingsView: View {
             Tab("General", systemImage: "gear") {
                 GeneralSettingsView()
             }
-Tab("HomeKit", systemImage: "house") {
+            Tab("HomeKit", systemImage: "house") {
                 HomeKitSettingsView()
             }
             Tab("Devices", systemImage: "list.bullet.rectangle") {
