@@ -20,7 +20,7 @@ struct SettingsView: View {
                 IntegrationsSettingsView()
             }
         }
-        .frame(width: 550, height: 500)
+        .frame(width: 550, height: 550)
         .onAppear {
             // Menu bar apps (.accessory policy) don't auto-focus new windows.
             // Find our settings window and bring it to front.

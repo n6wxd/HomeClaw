@@ -43,6 +43,8 @@ HomeKitHelper (Mac Catalyst, headless)
 - Node.js 20+ (for the MCP server wrapper)
 - **Apple Developer account** with HomeKit capability enabled
 
+> **Why is a developer account required?** Apple does not provide a public HomeKit API for macOS. The only way to access HomeKit is through `HMHomeManager`, which requires the `com.apple.developer.homekit` entitlement and a provisioning profile that covers your Mac's hardware UDID. Apple restricts this entitlement to development signing and App Store distribution -- it cannot be included in Developer ID (notarized) builds. This means every Mac that runs HomeClaw must be registered as a development device in your Apple Developer portal, and the app must be built with your team's signing identity. There is no way around this; it's an Apple platform restriction, not a HomeClaw limitation.
+
 ### Setup
 
 ```bash

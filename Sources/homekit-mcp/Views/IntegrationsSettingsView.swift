@@ -5,6 +5,7 @@ struct IntegrationsSettingsView: View {
 
     @State private var claudeDesktopStatus: DesktopStatus = .checking
     @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
+    @State private var openClawStatus: OpenClawStatus = .checking
     @State private var statusMessage: StatusMessage?
 
     // MARK: - Status Enums
@@ -27,11 +28,22 @@ struct IntegrationsSettingsView: View {
         case notInstalled
     }
 
+    private enum OpenClawStatus {
+        case checking
+        /// ~/.openclaw/ directory doesn't exist.
+        case openClawNotDetected
+        /// OpenClaw config exists but homeclaw plugin not found.
+        case notConfigured
+        /// Plugin found in OpenClaw config (allow list, entries, or load paths).
+        case configured
+    }
+
     // MARK: - Constants & Paths
 
     private static let serverName = "homekit-bridge"
     private static let pluginPrefix = "homekit-bridge@"
     private static let githubRepo = "omarshahine/HomeClaw"
+    private static let openClawPluginID = "homeclaw"
 
     private static var claudeDesktopConfigPath: String {
         FileManager.default.homeDirectoryForCurrentUser.path
@@ -46,6 +58,10 @@ struct IntegrationsSettingsView: View {
         FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/settings.json"
     }
 
+    private static var openClawConfigPath: String {
+        FileManager.default.homeDirectoryForCurrentUser.path + "/.openclaw/openclaw.json"
+    }
+
     /// Path to the bundled mcp-server.js inside the app's Resources.
     private static var bundledServerJSPath: String? {
         let path = Bundle.main.bundlePath + "/Contents/Resources/mcp-server.js"
@@ -58,6 +74,7 @@ struct IntegrationsSettingsView: View {
         Form {
             claudeDesktopSection
             claudeCodeSection
+            openClawSection
 
             if let message = statusMessage {
                 Section {
@@ -201,6 +218,70 @@ struct IntegrationsSettingsView: View {
         }
     }
 
+    // MARK: - OpenClaw Section
+
+    @ViewBuilder
+    private var openClawSection: some View {
+        Section("OpenClaw") {
+            LabeledContent("Status") {
+                openClawStatusLabel
+            }
+
+            switch openClawStatus {
+            case .configured:
+                Text("HomeClaw plugin is configured on the OpenClaw gateway.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+            case .notConfigured:
+                Button("Copy Setup Instructions") {
+                    copyOpenClawSetupInstructions()
+                }
+
+                openClawInstructionsView
+
+            case .openClawNotDetected:
+                Text("OpenClaw not detected. Install OpenClaw and configure your gateway first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+            case .checking:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var openClawInstructionsView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("On your OpenClaw gateway:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("# 1. Clone the repo")
+                    .foregroundStyle(.tertiary)
+                Text("git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw")
+                Text("")
+                Text("# 2. Add to openclaw.json plugins section")
+                    .foregroundStyle(.tertiary)
+                Text("plugins.allow: [\"homeclaw\"]")
+                Text("plugins.load.paths: [\"~/GitHub/HomeClaw/openclaw\"]")
+                Text("plugins.entries.homeclaw: { \"enabled\": true }")
+                Text("")
+                Text("# 3. Restart the gateway")
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+
+            Text("The plugin discovers homekit-cli via standard paths. Ensure the CLI is accessible from the gateway.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Status Labels
 
     @ViewBuilder
@@ -239,11 +320,30 @@ struct IntegrationsSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var openClawStatusLabel: some View {
+        switch openClawStatus {
+        case .checking:
+            Label("Checking\u{2026}", systemImage: "circle.dotted")
+                .foregroundStyle(.secondary)
+        case .configured:
+            Label("Configured", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .notConfigured:
+            Label("Not Configured", systemImage: "circle")
+                .foregroundStyle(.secondary)
+        case .openClawNotDetected:
+            Label("OpenClaw Not Detected", systemImage: "circle")
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Status Checking
 
     private func refreshStatuses() {
         claudeDesktopStatus = checkClaudeDesktopStatus()
         claudeCodeStatus = checkClaudeCodeStatus()
+        openClawStatus = checkOpenClawStatus()
     }
 
     private func checkClaudeDesktopStatus() -> DesktopStatus {
@@ -284,6 +384,43 @@ struct IntegrationsSettingsView: View {
         return servers[Self.serverName] != nil
     }
 
+    private func checkOpenClawStatus() -> OpenClawStatus {
+        let configDir = (Self.openClawConfigPath as NSString).deletingLastPathComponent
+        guard FileManager.default.fileExists(atPath: configDir) else {
+            return .openClawNotDetected
+        }
+
+        guard let config = readConfig(at: Self.openClawConfigPath),
+            let plugins = config["plugins"] as? [String: Any]
+        else {
+            return .notConfigured
+        }
+
+        // Check allow list
+        if let allow = plugins["allow"] as? [String],
+            allow.contains(Self.openClawPluginID)
+        {
+            return .configured
+        }
+
+        // Check entries
+        if let entries = plugins["entries"] as? [String: Any],
+            entries[Self.openClawPluginID] != nil
+        {
+            return .configured
+        }
+
+        // Check load paths for HomeClaw/openclaw
+        if let load = plugins["load"] as? [String: Any],
+            let paths = load["paths"] as? [String],
+            paths.contains(where: { $0.contains("HomeClaw") })
+        {
+            return .configured
+        }
+
+        return .notConfigured
+    }
+
     // MARK: - Install Actions
 
     private func installClaudeDesktop() {
@@ -322,6 +459,21 @@ struct IntegrationsSettingsView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(commands, forType: .string)
         showStatus("Install commands copied to clipboard", isError: false)
+    }
+
+    private func copyOpenClawSetupInstructions() {
+        let instructions = """
+            # Clone HomeClaw on the gateway
+            git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw
+
+            # Add to openclaw.json plugins section:
+            # plugins.allow: add "homeclaw"
+            # plugins.load.paths: add "~/GitHub/HomeClaw/openclaw"
+            # plugins.entries.homeclaw: { "enabled": true }
+            """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(instructions, forType: .string)
+        showStatus("Setup instructions copied to clipboard", isError: false)
     }
 
     // MARK: - Remove
