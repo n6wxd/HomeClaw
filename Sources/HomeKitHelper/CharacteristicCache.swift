@@ -9,7 +9,7 @@ import Foundation
 final class CharacteristicCache: @unchecked Sendable {
     static let shared = CharacteristicCache()
 
-    private static let ttlSeconds: TimeInterval = 60 // 1 minute
+    private static let ttlSeconds: TimeInterval = 300 // 5 minutes (safety net; HMAccessoryDelegate handles real-time updates)
 
     private let configDir: URL
     private let cacheFile: URL
