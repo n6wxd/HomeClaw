@@ -110,6 +110,17 @@ targets:
             echo "warning: HomeClawHelper.app not found — run scripts/build.sh first or build it separately"
           fi
 
+          # Copy HomeClawHelper dSYM into BUILT_PRODUCTS_DIR so Xcode
+          # includes it in the archive's dSYMs folder automatically
+          for DSYM in \
+            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Release-maccatalyst/HomeClawHelper.app.dSYM" \
+            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Debug-maccatalyst/HomeClawHelper.app.dSYM"; do
+            if [ -d "${DSYM}" ]; then
+              cp -R "${DSYM}" "${BUILT_PRODUCTS_DIR}/"
+              break
+            fi
+          done
+
           # Copy homeclaw-cli into Contents/MacOS/
           if [ -f "${BUILT_PRODUCTS_DIR}/homeclaw-cli" ]; then
             cp "${BUILT_PRODUCTS_DIR}/homeclaw-cli" "${APP}/MacOS/homeclaw-cli"
