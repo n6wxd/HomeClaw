@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "HomeKitBridge",
+    name: "HomeClaw",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "homekit-mcp", targets: ["homekit-mcp"]),
-        .executable(name: "homekit-cli", targets: ["homekit-cli"]),
+        .executable(name: "homeclaw", targets: ["homeclaw"]),
+        .executable(name: "homeclaw-cli", targets: ["homeclaw-cli"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.7.0"),
     ],
     targets: [
         .executableTarget(
-            name: "homekit-mcp",
+            name: "homeclaw",
             exclude: ["MCP/_disabled", "Shared/_disabled"]
         ),
         .executableTarget(
-            name: "homekit-cli",
+            name: "homeclaw-cli",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],

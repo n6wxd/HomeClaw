@@ -16,16 +16,16 @@ jobs:
 
       - name: Verify HomeKit entitlement
         run: |
-          if ! grep -q 'com.apple.developer.homekit' Sources/HomeKitHelper/HomeKitHelper.entitlements; then
-            echo "::error::HomeKit entitlement missing from HomeKitHelper.entitlements — readValue() will silently fail"
+          if ! grep -q 'com.apple.developer.homekit' Sources/HomeClawHelper/HomeClawHelper.entitlements; then
+            echo "::error::HomeKit entitlement missing from HomeClawHelper.entitlements — readValue() will silently fail"
             exit 1
           fi
 
-      - name: Build homekit-mcp
-        run: swift build --product homekit-mcp
+      - name: Build homeclaw
+        run: swift build --product homeclaw
 
-      - name: Build homekit-cli
-        run: swift build --product homekit-cli
+      - name: Build homeclaw-cli
+        run: swift build --product homeclaw-cli
 
       - name: Setup Node
         uses: actions/setup-node@v4

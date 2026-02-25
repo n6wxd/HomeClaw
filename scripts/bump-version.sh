@@ -44,8 +44,8 @@ FILE="$PROJECT_ROOT/Resources/Info.plist"
 sed -i '' "/<key>CFBundleShortVersionString<\/key>/{ n; s/<string>[^<]*<\/string>/<string>$VERSION<\/string>/; }" "$FILE"
 update_file "$FILE" "Main bundle version"
 
-# 2. HomeKitHelper/Info.plist — CFBundleShortVersionString
-FILE="$PROJECT_ROOT/Sources/HomeKitHelper/Info.plist"
+# 2. HomeClawHelper/Info.plist — CFBundleShortVersionString
+FILE="$PROJECT_ROOT/Sources/HomeClawHelper/Info.plist"
 sed -i '' "/<key>CFBundleShortVersionString<\/key>/{ n; s/<string>[^<]*<\/string>/<string>$VERSION<\/string>/; }" "$FILE"
 update_file "$FILE" "Helper bundle version"
 
@@ -87,5 +87,5 @@ echo ""
 echo "Next steps:"
 echo "  npm run build:mcp                        # Rebuild MCP server"
 echo "  git add -A && git commit -m \"Bump version to $VERSION\""
-echo "  git tag -a v$VERSION -m \"HomeKit Bridge v$VERSION\""
+echo "  git tag -a v$VERSION -m \"HomeClaw v$VERSION\""
 echo "  git push && git push origin v$VERSION"
