@@ -37,6 +37,9 @@ GIT_TAG=$(git -C "$PROJECT_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/
 MARKETING_VERSION="${GIT_TAG#v}"
 
 # Auto-incrementing build number persisted in .build-number
+# The Xcode pre-build script ("Increment Build Number") handles the main app's
+# Info.plist and .build-number during archive. We read/increment here only to
+# pass the SAME value to the HomeClawHelper build (separate Catalyst project).
 BUILD_NUMBER_FILE="$PROJECT_ROOT/.build-number"
 if [[ -f "$BUILD_NUMBER_FILE" ]]; then
     BUILD_NUMBER=$(( $(cat "$BUILD_NUMBER_FILE") + 1 ))
@@ -45,6 +48,10 @@ else
     BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
 fi
 echo "$BUILD_NUMBER" > "$BUILD_NUMBER_FILE"
+
+# Patch Info.plist so the archive pre-build script sees the correct value
+# (the pre-build script will detect .build-number is already current and skip)
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PROJECT_ROOT/Resources/Info.plist"
 
 ARCHIVE_PATH="$PROJECT_ROOT/.build/archives/$APP_NAME.xcarchive"
 

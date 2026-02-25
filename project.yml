@@ -48,6 +48,34 @@ targets:
       - target: homeclaw-cli
         embed: false
     preBuildScripts:
+      - name: "Increment Build Number (Archive Only)"
+        script: |
+          # Only bump the build number during archive (ACTION=install)
+          if [ "$ACTION" != "install" ]; then
+            exit 0
+          fi
+
+          BUILD_NUMBER_FILE="${PROJECT_DIR}/.build-number"
+          PLIST="${PROJECT_DIR}/Resources/Info.plist"
+          CURRENT_PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "0")
+
+          if [ -f "$BUILD_NUMBER_FILE" ]; then
+            FILE_VERSION=$(cat "$BUILD_NUMBER_FILE")
+            # If archive.sh already incremented and patched, .build-number
+            # and Info.plist will match — skip to avoid double-increment
+            if [ "$FILE_VERSION" = "$CURRENT_PLIST_VERSION" ] && [ "$FILE_VERSION" -gt 1 ] 2>/dev/null; then
+              echo "Build number already set to $FILE_VERSION by archive.sh"
+              exit 0
+            fi
+            BUILD_NUMBER=$(( FILE_VERSION + 1 ))
+          else
+            BUILD_NUMBER=$(git -C "${PROJECT_DIR}" rev-list --count HEAD 2>/dev/null || echo "1")
+          fi
+
+          echo "$BUILD_NUMBER" > "$BUILD_NUMBER_FILE"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          echo "Build number set to $BUILD_NUMBER"
+        basedOnDependencyAnalysis: false
       - name: "Build MCP Server"
         script: |
           if command -v node &>/dev/null && [ -f "${PROJECT_DIR}/mcp-server/build.mjs" ]; then
