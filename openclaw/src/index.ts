@@ -1,8 +1,8 @@
 /**
  * HomeClaw — OpenClaw plugin entry point for HomeKit Bridge.
  *
- * This plugin discovers the homekit-cli binary and registers MCP tools
- * that invoke CLI commands for HomeKit smart home control.
+ * This plugin discovers the homekit-cli binary and registers it with
+ * OpenClaw for HomeKit smart home control.
  *
  * Binary discovery order:
  * 1. Plugin config `binDir`
@@ -11,6 +11,8 @@
  * 4. Standard locations (~/.local/bin/, /usr/local/bin/)
  * 5. Build output (.build/debug/, .build/release/)
  */
+
+import { existsSync } from 'node:fs';
 
 export const TOOL_PREFIX = 'homekit';
 
@@ -38,6 +40,27 @@ export function discoverBinary(configBinDir?: string): string | null {
     `${home}/GitHub/HomeClaw/.build/release/homekit-cli`,
   );
 
-  // Check existence (would be done at runtime)
-  return candidates[0] || null;
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+  return null;
+}
+
+/**
+ * OpenClaw plugin entry point.
+ *
+ * Called by the OpenClaw gateway when the plugin loads. Validates that the
+ * homekit-cli binary is discoverable and logs a warning if not found.
+ */
+export function register(api: any): void {
+  const config = api.getConfig?.() ?? {};
+  const binPath = discoverBinary(config.binDir);
+
+  if (binPath) {
+    api.log?.('info', `HomeClaw: using homekit-cli at ${binPath}`);
+  } else {
+    api.log?.('warn', 'HomeClaw: homekit-cli not found. Install HomeKit Bridge.app or set binDir in plugin config.');
+  }
 }

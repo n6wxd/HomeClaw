@@ -4,11 +4,7 @@
   "private": true,
   "description": "OpenClaw plugin for HomeKit smart home control — lights, locks, thermostats, and scenes",
   "type": "module",
-  "openclaw": {
-    "extensions": ["./src/index.ts"]
-  },
   "files": [
-    "src/",
     "skills/",
     "openclaw.plugin.json"
   ],
@@ -34,8 +30,5 @@
   "publishConfig": {
     "access": "public"
   },
-  "os": ["darwin"],
-  "engines": {
-    "node": ">=18"
-  }
+  "os": ["darwin"]
 }
