@@ -144,6 +144,12 @@ xcodebuild archive \
 
 printf "  %s\n" "$(green)"
 
+# Copy HomeClawHelper dSYMs into the archive (built separately)
+HELPER_DSYM="$DERIVED_DATA/Build/Products/Release-maccatalyst/HomeClawHelper.app.dSYM"
+if [[ -d "$HELPER_DSYM" ]]; then
+    cp -R "$HELPER_DSYM" "$ARCHIVE_PATH/dSYMs/"
+fi
+
 # ─── Summary ────────────────────────────────────────────────
 
 echo ""
