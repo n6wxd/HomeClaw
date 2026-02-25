@@ -7,9 +7,6 @@ struct SettingsView: View {
             Tab("General", systemImage: "gear") {
                 GeneralSettingsView()
             }
-            Tab("Server", systemImage: "server.rack") {
-                ServerSettingsView()
-            }
             Tab("HomeKit", systemImage: "house") {
                 HomeKitSettingsView()
             }
@@ -59,69 +56,6 @@ private struct GeneralSettingsView: View {
                 .font(.caption)
         }
         .formStyle(.grouped)
-    }
-}
-
-// MARK: - Server
-
-private struct ServerSettingsView: View {
-    @AppStorage(AppConfig.portKey) private var port = AppConfig.defaultPort
-    @State private var tokenVisible = false
-    @State private var currentToken = ""
-
-    var body: some View {
-        Form {
-            TextField("Port", value: $port, format: .number)
-                .help("MCP server port (requires restart)")
-
-            LabeledContent("Endpoint") {
-                Text("http://127.0.0.1:\(port)\(AppConfig.mcpEndpoint)")
-                    .textSelection(.enabled)
-                    .font(.system(.body, design: .monospaced))
-            }
-
-            Section("Authentication") {
-                HStack {
-                    if tokenVisible {
-                        Text(currentToken)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                    } else {
-                        Text(String(repeating: "\u{2022}", count: 32))
-                            .font(.system(.caption, design: .monospaced))
-                    }
-
-                    Spacer()
-
-                    Button(tokenVisible ? "Hide" : "Reveal") {
-                        tokenVisible.toggle()
-                    }
-                }
-
-                HStack {
-                    Button("Copy Token") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(currentToken, forType: .string)
-                    }
-
-                    Button("Rotate Token") {
-                        do {
-                            currentToken = try KeychainManager.rotateToken()
-                        } catch {
-                            AppLogger.auth.error("Token rotation failed: \(error.localizedDescription)")
-                        }
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear {
-            do {
-                currentToken = try KeychainManager.ensureToken()
-            } catch {
-                AppLogger.auth.error("Failed to load token: \(error.localizedDescription)")
-            }
-        }
     }
 }
 
@@ -182,7 +116,7 @@ private struct HomeKitSettingsView: View {
                             }
                         }
 
-                        Text("All commands operate on the selected home. Use the MCP or CLI to switch homes.")
+                        Text("All commands operate on the selected home. Use the CLI to switch homes.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

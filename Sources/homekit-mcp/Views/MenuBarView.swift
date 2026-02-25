@@ -2,29 +2,11 @@ import SwiftUI
 
 struct MenuBarView: View {
     private var manager = HelperManager.shared
-    @State private var tokenCopied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // HomeKit Status
             helperStatusView
-
-            Divider()
-
-            // MCP Server Status
-            Label("MCP Server: port \(AppConfig.port)", systemImage: "server.rack")
-
-            Divider()
-
-            // Auth Token
-            Button {
-                copyToken()
-            } label: {
-                Label(
-                    tokenCopied ? "Token Copied!" : "Copy Auth Token",
-                    systemImage: tokenCopied ? "checkmark.circle.fill" : "key.fill"
-                )
-            }
 
             Divider()
 
@@ -110,23 +92,5 @@ struct MenuBarView: View {
             return "Restart Helper (\(remaining) auto-restarts left)"
         }
         return "Restart Helper"
-    }
-
-    // MARK: - Token Copy
-
-    private func copyToken() {
-        do {
-            if let token = try KeychainManager.readToken() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(token, forType: .string)
-                tokenCopied = true
-                Task {
-                    try? await Task.sleep(for: .seconds(2))
-                    tokenCopied = false
-                }
-            }
-        } catch {
-            AppLogger.auth.error("Failed to read token: \(error.localizedDescription)")
-        }
     }
 }

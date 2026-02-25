@@ -13,7 +13,6 @@ struct HomeKitCLI: ParsableCommand {
             Trigger.self,
             Search.self,
             Status.self,
-            Token.self,
             Config.self,
             DeviceMapCmd.self,
         ],
