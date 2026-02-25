@@ -27,9 +27,10 @@ targets:
         excludes:
           - "**/MCP/_disabled/**"
           - "**/Shared/_disabled/**"
-    resources:
       - path: Resources/HomeClaw.icns
+        buildPhase: resources
       - path: Resources/HomeClaw.icon
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
@@ -119,6 +120,7 @@ targets:
       base:
         PRODUCT_NAME: homeclaw-cli
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Resources/homeclaw-cli.entitlements
         DEVELOPMENT_TEAM: ${HOMEKIT_TEAM_ID}
         ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
