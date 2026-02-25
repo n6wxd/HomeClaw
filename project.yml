@@ -1,0 +1,138 @@
+name: HomeClaw
+options:
+  bundleIdPrefix: com.shahine
+  deploymentTarget:
+    macOS: "26.0"
+  xcodeVersion: "26.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  swift-argument-parser:
+    url: https://github.com/apple/swift-argument-parser.git
+    from: "1.7.0"
+
+targets:
+  # ─── Main App (macOS menu bar) ─────────────────────────────
+  homeclaw:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/homeclaw
+        excludes:
+          - "**/MCP/_disabled/**"
+          - "**/Shared/_disabled/**"
+    resources:
+      - path: Resources/HomeClaw.icns
+      - path: Resources/HomeClaw.icon
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
+        PRODUCT_NAME: homeclaw
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/HomeClaw.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${HOMEKIT_TEAM_ID}
+        ASSETCATALOG_COMPILER_APPICON_NAME: HomeClaw
+        MACOSX_BUNDLE_ICON_FILE: HomeClaw
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    dependencies:
+      - target: homeclaw-cli
+        embed: false
+    preBuildScripts:
+      - name: "Build MCP Server"
+        script: |
+          if command -v node &>/dev/null && [ -f "${PROJECT_DIR}/mcp-server/build.mjs" ]; then
+            cd "${PROJECT_DIR}"
+            if [ ! -f "mcp-server/dist/server.js" ] || [ "mcp-server/server.js" -nt "mcp-server/dist/server.js" ]; then
+              node mcp-server/build.mjs 2>/dev/null || echo "warning: MCP server build skipped"
+            fi
+          fi
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: "Bundle Helper + CLI + Resources"
+        script: |
+          APP="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents"
+
+          # Copy HomeClawHelper.app into Contents/Helpers/
+          # Helper is built separately (Mac Catalyst) — check multiple locations
+          mkdir -p "${APP}/Helpers"
+          HELPER_FOUND=false
+          for DIR in \
+            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Release-maccatalyst/HomeClawHelper.app" \
+            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Debug-maccatalyst/HomeClawHelper.app" \
+            "${BUILT_PRODUCTS_DIR}/HomeClawHelper.app" \
+            "${BUILD_DIR}/Release-maccatalyst/HomeClawHelper.app" \
+            "${BUILD_DIR}/Debug-maccatalyst/HomeClawHelper.app"; do
+            if [ -d "${DIR}" ]; then
+              cp -R "${DIR}" "${APP}/Helpers/"
+              HELPER_FOUND=true
+              break
+            fi
+          done
+          if [ "$HELPER_FOUND" = false ]; then
+            echo "warning: HomeClawHelper.app not found — run scripts/build.sh first or build it separately"
+          fi
+
+          # Copy homeclaw-cli into Contents/MacOS/
+          if [ -f "${BUILT_PRODUCTS_DIR}/homeclaw-cli" ]; then
+            cp "${BUILT_PRODUCTS_DIR}/homeclaw-cli" "${APP}/MacOS/homeclaw-cli"
+          fi
+
+          # Copy mcp-server.js into Contents/Resources/
+          MCP_JS="${PROJECT_DIR}/mcp-server/dist/server.js"
+          if [ -f "${MCP_JS}" ]; then
+            cp "${MCP_JS}" "${APP}/Resources/mcp-server.js"
+          fi
+
+          # Copy openclaw plugin files into Contents/Resources/openclaw/
+          OPENCLAW="${PROJECT_DIR}/openclaw"
+          if [ -d "${OPENCLAW}" ]; then
+            DEST="${APP}/Resources/openclaw"
+            mkdir -p "${DEST}"
+            cp "${OPENCLAW}/openclaw.plugin.json" "${DEST}/"
+            cp "${OPENCLAW}/package.json" "${DEST}/"
+            cp -R "${OPENCLAW}/src" "${DEST}/src"
+            cp -R "${OPENCLAW}/skills" "${DEST}/skills"
+          fi
+        basedOnDependencyAnalysis: false
+
+  # ─── CLI Tool ──────────────────────────────────────────────
+  homeclaw-cli:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/homeclaw-cli
+        excludes:
+          - "**/Commands/_disabled/**"
+    dependencies:
+      - package: swift-argument-parser
+        product: ArgumentParser
+    settings:
+      base:
+        PRODUCT_NAME: homeclaw-cli
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${HOMEKIT_TEAM_ID}
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+
+schemes:
+  HomeClaw:
+    build:
+      targets:
+        homeclaw: all
+        homeclaw-cli: all
+    run:
+      config: Debug
+      executable: homeclaw
+    archive:
+      config: Release
+    profile:
+      config: Release

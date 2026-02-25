@@ -20,6 +20,8 @@
     <string>HomeClaw</string>
     <key>LSUIElement</key>
     <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
     <key>NSHomeKitUsageDescription</key>
     <string>HomeClaw needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
     <key>LSMinimumSystemVersion</key>
