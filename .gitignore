@@ -15,6 +15,9 @@ DerivedData/
 # Local configuration (contains developer Team ID)
 .env.local
 
+# Auto-incrementing build number (local per machine)
+.build-number
+
 # Generated device maps (user-specific snapshots)
 device-map*.json
 device-map*.md

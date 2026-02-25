@@ -31,11 +31,20 @@ fi
 bold()  { printf "\033[1m%s\033[0m" "$1"; }
 green() { printf "\033[32m✓\033[0m"; }
 
-# ─── Derive version from git ────────────────────────────────
+# ─── Derive version and build number ─────────────────────────
 
 GIT_TAG=$(git -C "$PROJECT_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "v0.0.1")
 MARKETING_VERSION="${GIT_TAG#v}"
-BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
+
+# Auto-incrementing build number persisted in .build-number
+BUILD_NUMBER_FILE="$PROJECT_ROOT/.build-number"
+if [[ -f "$BUILD_NUMBER_FILE" ]]; then
+    BUILD_NUMBER=$(( $(cat "$BUILD_NUMBER_FILE") + 1 ))
+else
+    # Seed from git commit count on first run
+    BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
+fi
+echo "$BUILD_NUMBER" > "$BUILD_NUMBER_FILE"
 
 ARCHIVE_PATH="$PROJECT_ROOT/.build/archives/$APP_NAME.xcarchive"
 
