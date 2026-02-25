@@ -15,7 +15,7 @@ import {
 } from '../lib/handlers/homekit.js';
 
 const server = new Server(
-  { name: 'homeclaw', version: '0.0.1' },
+  { name: 'homeclaw', version: '0.0.2' },
   { capabilities: { tools: {} } }
 );
 
