@@ -12,6 +12,7 @@ final class HomeKitManager: NSObject, Observable {
 
     private let cache = CharacteristicCache.shared
     private var isWarmingCache = false
+    private var menuPushTask: Task<Void, Never>?
 
     private(set) var homes: [HMHome] = []
 
@@ -326,6 +327,83 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
+    // MARK: - Menu Data
+
+    /// Builds a complete snapshot of the current home's rooms, accessories, and scenes
+    /// for the menu bar. Reads only from the in-memory cache — no async I/O.
+    func buildMenuData() -> [String: Any] {
+        guard homesReady else { return ["ready": false] }
+
+        let targetHomes = filteredHomes(homeID: nil)
+        guard let selectedHome = targetHomes.first else {
+            return ["ready": true, "selected_home": "", "homes": [], "scenes": [], "rooms": []]
+        }
+
+        let homesList: [[String: Any]] = homes.map { home in
+            [
+                "id": home.uniqueIdentifier.uuidString,
+                "name": home.name,
+                "is_selected": home.uniqueIdentifier == selectedHome.uniqueIdentifier,
+            ]
+        }
+
+        let scenesList: [[String: Any]] = selectedHome.actionSets
+            .map { AccessoryModel.sceneSummary($0) }
+            .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
+
+        // Category priority: controllable items first, then status-only
+        let categoryOrder: [String: Int] = [
+            "lightbulb": 0, "switch": 1, "outlet": 2, "fan": 3,
+            "air_purifier": 4, "valve": 5, "window_covering": 6,
+            "thermostat": 10, "lock": 11, "door": 12, "garage_door": 13,
+            "camera": 14, "doorbell": 15, "security_system": 16,
+            "sensor": 20, "programmable_switch": 21,
+        ]
+
+        let roomsList: [[String: Any]] = selectedHome.rooms.compactMap { room in
+            let filtered = filterAccessories(room.accessories)
+            guard !filtered.isEmpty else { return nil }
+            let accessories: [[String: Any]] = filtered
+                .map { accessory in
+                    let id = accessory.uniqueIdentifier.uuidString
+                    return AccessoryModel.accessorySummary(
+                        accessory, cachedState: cache.cachedState(for: id))
+                }
+                .sorted { a, b in
+                    let catA = a["category"] as? String ?? "other"
+                    let catB = b["category"] as? String ?? "other"
+                    let orderA = categoryOrder[catA] ?? 50
+                    let orderB = categoryOrder[catB] ?? 50
+                    if orderA != orderB { return orderA < orderB }
+                    return (a["name"] as? String ?? "") < (b["name"] as? String ?? "")
+                }
+            return [
+                "name": room.name,
+                "accessories": accessories,
+            ]
+        }
+        .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
+
+        return [
+            "ready": true,
+            "selected_home": selectedHome.name,
+            "homes": homesList,
+            "scenes": scenesList,
+            "rooms": roomsList,
+        ]
+    }
+
+    /// Debounced push of menu data via notification. Coalesces rapid updates
+    /// (e.g., a scene triggering many accessories) into a single rebuild.
+    func scheduleMenuDataPush() {
+        menuPushTask?.cancel()
+        menuPushTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            NotificationCenter.default.post(name: .homeKitMenuDataDidChange, object: nil)
+        }
+    }
+
     // MARK: - Cache
 
     /// Warms the cache by reading interesting values from all filtered accessories.
@@ -376,6 +454,7 @@ final class HomeKitManager: NSObject, Observable {
         AppLogger.homekit.info(
             "Cache warmed: \(warmedCount)/\(filtered.count) accessories in \(String(format: "%.1f", elapsed))s"
         )
+        scheduleMenuDataPush()
     }
 
     /// Extracts interesting state from an accessory after a live read and updates the cache.
@@ -563,12 +642,14 @@ extension HomeKitManager: HMHomeManagerDelegate {
                 object: nil,
                 userInfo: ["ready": self.homesReady, "homeNames": names]
             )
+            scheduleMenuDataPush()
         }
     }
 }
 
 extension Notification.Name {
     static let homeKitStatusDidChange = Notification.Name("HomeKitStatusDidChange")
+    static let homeKitMenuDataDidChange = Notification.Name("HomeKitMenuDataDidChange")
 }
 
 // MARK: - HMAccessoryDelegate
@@ -599,6 +680,7 @@ extension HomeKitManager: HMAccessoryDelegate {
             AppLogger.homekit.debug(
                 "Live update: \(accessory.name).\(name) = \(value)"
             )
+            scheduleMenuDataPush()
         }
     }
 }

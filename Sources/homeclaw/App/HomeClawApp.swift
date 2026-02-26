@@ -15,6 +15,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 
     private var macOSController: (any iOS2Mac)?
     private var homeKitObserver: NSObjectProtocol?
+    private var menuDataObserver: NSObjectProtocol?
 
     // MARK: - Mac2iOS Protocol
 
@@ -45,6 +46,35 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         Task { @MainActor in
             _ = await HomeKitManager.shared.refreshCache()
         }
+    }
+
+    @objc func controlAccessory(id: String, characteristic: String, value: String) {
+        Task { @MainActor in
+            do {
+                _ = try await HomeKitManager.shared.controlAccessory(
+                    id: id, characteristic: characteristic, value: value)
+            } catch {
+                AppLogger.app.error("Menu control failed: \(error.localizedDescription)")
+                macOSController?.flashError()
+            }
+        }
+    }
+
+    @objc func triggerScene(id: String) {
+        Task { @MainActor in
+            do {
+                _ = try await HomeKitManager.shared.triggerScene(id: id)
+            } catch {
+                AppLogger.app.error("Menu scene trigger failed: \(error.localizedDescription)")
+                macOSController?.flashError()
+            }
+        }
+    }
+
+    @objc func selectHome(id: String) {
+        HomeClawConfig.shared.defaultHomeID = id
+        HomeKitManager.shared.scheduleMenuDataPush()
+        refreshData()
     }
 
     @objc func openSettings() {
@@ -115,6 +145,18 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             }
         }
 
+        // Observe HomeKit menu data changes for the interactive menu
+        menuDataObserver = NotificationCenter.default.addObserver(
+            forName: .homeKitMenuDataDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                let data = HomeKitManager.shared.buildMenuData()
+                self?.macOSController?.updateMenuData(data)
+            }
+        }
+
         return true
     }
 
@@ -122,6 +164,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         AppLogger.app.info("HomeClaw shutting down...")
         SocketServer.shared.stop()
         if let observer = homeKitObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = menuDataObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -237,12 +282,10 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
         windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
 
-        // Bring the app to the foreground and center the window.
-        // Two-phase: activate immediately, then center after the window is laid out.
+        // Bring the app to the foreground and center the window in one pass
+        // so the window doesn't appear off-center then visibly jump.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             Self.activateApp()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             Self.centerWindow()
         }
         #endif
@@ -311,9 +354,29 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     #endif
 
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        #if targetEnvironment(macCatalyst)
+        // Revert to accessory (no dock icon) when settings window closes.
+        // In Catalyst, closing a window backgrounds the scene rather than
+        // disconnecting it, so sceneDidDisconnect is not called.
+        Self.revertToAccessoryPolicy()
+
+        // Destroy the scene session so it doesn't linger
+        if let session = (scene as? UIWindowScene)?.session {
+            UIApplication.shared.requestSceneSessionDestruction(
+                session, options: nil)
+        }
+        #endif
+    }
+
     func sceneDidDisconnect(_ scene: UIScene) {
         #if targetEnvironment(macCatalyst)
-        // Revert to accessory (no dock icon) when settings closes
+        Self.revertToAccessoryPolicy()
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    private static func revertToAccessoryPolicy() {
         guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
               let metaclass = object_getClass(nsAppClass),
               let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
@@ -329,8 +392,8 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         _ = setPolicy(sharedApp, setPolicySel, 1)  // 1 = accessory
 
         AppLogger.app.info("Settings closed — reverted to accessory mode")
-        #endif
     }
+    #endif
 }
 
 // MARK: - Headless Scene Delegate
