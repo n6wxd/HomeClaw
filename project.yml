@@ -12,7 +12,6 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     DEAD_CODE_STRIPPING: YES
-    DEVELOPMENT_TEAM: N9DRSTM2U6
     SWIFT_EMIT_LOC_STRINGS: YES
     CODE_SIGN_STYLE: Automatic
 
@@ -35,6 +34,8 @@ targets:
       - path: Resources/HomeClaw.icns
         buildPhase: resources
       - path: Resources/HomeClaw.icon
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     settings:
       base:
