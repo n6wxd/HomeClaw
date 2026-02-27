@@ -316,8 +316,9 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// Temporarily set activation policy to .regular so the settings window is visible,
-    /// then revert to .accessory when the scene disconnects.
+    /// Brings the app to the foreground without changing activation policy.
+    /// The app stays in .accessory mode (no dock icon) — windows are still
+    /// focusable via activateIgnoringOtherApps.
     private static func activateApp() {
         guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
               let metaclass = object_getClass(nsAppClass),
@@ -326,12 +327,6 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
         let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
             nsAppClass, NSSelectorFromString("sharedApplication"))
-
-        let setPolicySel = NSSelectorFromString("setActivationPolicy:")
-        guard sharedApp.responds(to: setPolicySel) else { return }
-        typealias SetPolicyFn = @convention(c) (NSObject, Selector, Int) -> Bool
-        let setPolicy = unsafeBitCast(sharedApp.method(for: setPolicySel), to: SetPolicyFn.self)
-        _ = setPolicy(sharedApp, setPolicySel, 0)  // 0 = regular
 
         let activateSel = NSSelectorFromString("activateIgnoringOtherApps:")
         if sharedApp.responds(to: activateSel) {
@@ -372,50 +367,30 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 let center = unsafeBitCast(window.method(for: centerSel), to: CenterFn.self)
                 center(window, centerSel)
             }
+
+            // In accessory mode there's no dock icon, so the window might
+            // not come to front automatically. orderFrontRegardless ensures
+            // it appears above other apps' windows.
+            let orderFrontSel = NSSelectorFromString("orderFrontRegardless")
+            if window.responds(to: orderFrontSel) {
+                typealias OrderFrontFn = @convention(c) (NSObject, Selector) -> Void
+                let orderFront = unsafeBitCast(window.method(for: orderFrontSel), to: OrderFrontFn.self)
+                orderFront(window, orderFrontSel)
+            }
         }
     }
     #endif
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         #if targetEnvironment(macCatalyst)
-        // Revert to accessory (no dock icon) when settings window closes.
-        // In Catalyst, closing a window backgrounds the scene rather than
-        // disconnecting it, so sceneDidDisconnect is not called.
-        Self.revertToAccessoryPolicy()
-
-        // Destroy the scene session so it doesn't linger
+        // Destroy the scene session so it doesn't persist across launches.
         if let session = (scene as? UIWindowScene)?.session {
             UIApplication.shared.requestSceneSessionDestruction(
                 session, options: nil)
         }
+        AppLogger.app.info("Settings window closed")
         #endif
     }
-
-    func sceneDidDisconnect(_ scene: UIScene) {
-        #if targetEnvironment(macCatalyst)
-        Self.revertToAccessoryPolicy()
-        #endif
-    }
-
-    #if targetEnvironment(macCatalyst)
-    private static func revertToAccessoryPolicy() {
-        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
-              let metaclass = object_getClass(nsAppClass),
-              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
-        else { return }
-        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
-        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
-            nsAppClass, NSSelectorFromString("sharedApplication"))
-
-        let setPolicySel = NSSelectorFromString("setActivationPolicy:")
-        guard sharedApp.responds(to: setPolicySel) else { return }
-        typealias SetPolicyFn = @convention(c) (NSObject, Selector, Int) -> Bool
-        let setPolicy = unsafeBitCast(sharedApp.method(for: setPolicySel), to: SetPolicyFn.self)
-        _ = setPolicy(sharedApp, setPolicySel, 1)  // 1 = accessory
-
-        AppLogger.app.info("Settings closed — reverted to accessory mode")
-    }
-    #endif
 }
 
 // MARK: - Headless Scene Delegate
