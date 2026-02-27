@@ -45,6 +45,12 @@ The easiest way to install HomeClaw is via TestFlight:
 
 TestFlight builds are signed for App Store distribution, so HomeKit works without any developer account setup.
 
+Once running, set up your AI integrations:
+
+- **[Claude Desktop](#connecting-an-mcp-client)** -- one-click install from Settings > Integrations, or add the MCP server config manually
+- **[Claude Code](#using-with-claude-code)** -- install the plugin from GitHub
+- **[OpenClaw](#using-with-openclaw)** -- one-click install from Settings > Integrations, or set up manually
+
 ### Build from Source
 
 <details>
