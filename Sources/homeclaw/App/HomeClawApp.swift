@@ -17,6 +17,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private var homeKitObserver: NSObjectProtocol?
     private var menuDataObserver: NSObjectProtocol?
 
+    /// Set to true only by openSettings() — used to distinguish explicit
+    /// settings requests from UIKit scene session restoration on launch.
+    static var settingsRequested = false
+
     // MARK: - Mac2iOS Protocol
 
     @objc var isLaunchAtLoginEnabled: Bool {
@@ -78,6 +82,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func openSettings() {
+        Self.settingsRequested = true
         let activity = NSUserActivity(activityType: "com.shahine.homeclaw.settings")
         UIApplication.shared.requestSceneSessionActivation(
             nil, userActivity: activity, options: nil)
@@ -116,6 +121,12 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         // Hide from dock — menu bar only
         #if targetEnvironment(macCatalyst)
         setAccessoryActivationPolicy()
+
+        // Destroy any restored Settings scene sessions before UIKit connects
+        // them — prevents the Settings window from flashing on launch.
+        for session in application.openSessions where session.configuration.name == "Settings" {
+            application.requestSceneSessionDestruction(session, options: nil)
+        }
         #endif
 
         // Initialize HomeKit directly (no IPC needed)
@@ -269,6 +280,17 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         _ scene: UIScene, willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
+        // Only show settings if explicitly requested via openSettings().
+        // UIKit restores scene sessions on launch, replaying the original
+        // userActivity — so we can't distinguish via connectionOptions alone.
+        // The settingsRequested flag is only set by openSettings().
+        guard HomeClawApp.settingsRequested else {
+            AppLogger.app.info("Settings scene restored on launch — discarding")
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+            return
+        }
+        HomeClawApp.settingsRequested = false
+
         guard let windowScene = scene as? UIWindowScene else { return }
 
         let window = UIWindow(windowScene: windowScene)
