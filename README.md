@@ -32,9 +32,25 @@ OpenClaw --> Plugin (openclaw/) --> homeclaw-cli --------------------------+
 
 **Single-process design.** Apple's `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement. By making the entire app Catalyst, HomeKit access is direct (no IPC), signing is unified (single archive), and App Store submission is clean. The `macOSBridge` plugin bundle provides the native macOS menu bar via `NSStatusItem`.
 
-## Quick Start
+## Install
 
-### Prerequisites
+### TestFlight (Recommended)
+
+The easiest way to install HomeClaw is via TestFlight:
+
+1. **[Join the TestFlight Beta](https://testflight.apple.com/join/zjSnz8eK)**
+2. Install HomeClaw from TestFlight
+3. Launch the app -- grant HomeKit access when prompted
+4. The menu bar icon appears. Click it to see your connected homes.
+
+TestFlight builds are signed for App Store distribution, so HomeKit works without any developer account setup.
+
+### Build from Source
+
+<details>
+<summary>Prerequisites and setup for building from source</summary>
+
+#### Prerequisites
 
 - macOS 26 (Tahoe) or later
 - Xcode 26+ with Swift 6.2
@@ -44,7 +60,7 @@ OpenClaw --> Plugin (openclaw/) --> homeclaw-cli --------------------------+
 
 > **Why is a developer account required?** Apple does not provide a public HomeKit API for macOS. The only way to access HomeKit is through `HMHomeManager`, which requires the `com.apple.developer.homekit` entitlement and a provisioning profile that covers your Mac's hardware UDID. Apple restricts this entitlement to development signing and App Store distribution -- it cannot be included in Developer ID (notarized) builds. This means every Mac that runs HomeClaw must be registered as a development device in your Apple Developer portal, and the app must be built with your team's signing identity. There is no way around this; it's an Apple platform restriction, not a HomeClaw limitation.
 
-### Setup
+#### Setup
 
 ```bash
 git clone https://github.com/omarshahine/HomeClaw.git
@@ -67,6 +83,8 @@ Launch from `/Applications` or: `open "/Applications/HomeClaw.app"`
 On first launch, grant HomeKit access when prompted. The menu bar icon appears -- click it to see your connected homes.
 
 > **Note:** Apple restricts the HomeKit entitlement to development signing and App Store distribution. Developer ID builds cannot access HomeKit. See [Why Development Signing?](#why-development-signing) for details.
+
+</details>
 
 ## MCP Tools
 
