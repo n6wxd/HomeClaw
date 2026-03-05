@@ -364,7 +364,7 @@ private struct DeviceFilterSettingsView: View {
             let id = dict["id"] as? String ?? UUID().uuidString
             return AccessoryItem(
                 id: id,
-                name: dict["name"] as? String ?? "Unknown",
+                name: dict["home_display_name"] as? String ?? dict["name"] as? String ?? "Unknown",
                 category: dict["category"] as? String ?? "Other",
                 room: dict["room"] as? String ?? "",
                 homeName: dict["home_name"] as? String ?? "",
@@ -501,6 +501,20 @@ private struct WebhookSettingsView: View {
     @State private var isLoading = true
     @State private var saveTask: Task<Void, Never>?
 
+    // Circuit breaker observation
+    @State private var circuitState: String = "closed"
+    @State private var circuitSoftTripCount = 0
+    @State private var circuitRemainingSeconds = 0
+    @State private var circuitTotalDropped = 0
+    @State private var countdownTask: Task<Void, Never>?
+
+    // Copy feedback and edit mode for URL/token fields
+    @State private var copiedField: String?
+    @State private var isEditingEndpoint = false
+
+    // Per-trigger wake mode: keyed by scene ID or accessory ID → "now" or "next-heartbeat"
+    @State private var wakeModes: [String: String] = [:]
+
     @State private var enabledSceneIDs: Set<String> = []
     @State private var enabledAccessoryIDs: Set<String> = []
 
@@ -568,45 +582,168 @@ private struct WebhookSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Webhook endpoint
+            // Circuit breaker status banner
+            if circuitState == "softOpen" {
+                let minutes = circuitRemainingSeconds / 60
+                let seconds = circuitRemainingSeconds % 60
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Webhooks Paused")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Auto-resuming in \(minutes)m \(seconds)s (trip \(circuitSoftTripCount)/3)")
+                            .font(.caption)
+                        if circuitTotalDropped > 0 {
+                            Text("\(circuitTotalDropped) dropped")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            } else if circuitState == "hardOpen" {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Webhooks Disabled")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Toggle webhook off and on to re-enable")
+                            .font(.caption)
+                        if circuitTotalDropped > 0 {
+                            Text("\(circuitTotalDropped) dropped")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
+
+            // Endpoint configuration
             HStack {
                 Toggle("Enable Webhook", isOn: $webhookEnabled)
-                    .onChange(of: webhookEnabled) { _, _ in debouncedSaveWebhook() }
+                    .onChange(of: webhookEnabled) { _, newValue in
+                        // Reset circuit breaker only when toggling on (not during URL/token edits)
+                        if newValue && WebhookCircuitBreaker.shared.state == .hardOpen {
+                            WebhookCircuitBreaker.shared.manualReset()
+                        }
+                        debouncedSaveWebhook()
+                    }
                 Spacer()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.bottom, 6)
 
-            HStack(spacing: 8) {
-                TextField("Webhook URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789/hooks/wake"))
-                    .textContentType(.none)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .textFieldStyle(.roundedBorder)
-                    .foregroundStyle(.primary)
-                    .tint(.primary)
-                    .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
-
-            HStack(spacing: 8) {
-                TextField("Bearer Token", text: $webhookToken, prompt: Text("token"))
-                    .textContentType(.none)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
-
-                Button("Generate") {
-                    webhookToken = generateSecret()
-                    debouncedSaveWebhook()
+            if isEditingEndpoint {
+                // Edit mode — TextFields for URL and Token
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("URL")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        TextField("http://127.0.0.1:18789", text: $webhookURL)
+                            .textContentType(.none)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Token")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        TextField("token", text: $webhookToken)
+                            .textContentType(.none)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
+                    }
+                    HStack(spacing: 8) {
+                        Spacer()
+                        Button("Generate Token") {
+                            webhookToken = generateSecret()
+                            debouncedSaveWebhook()
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Done") {
+                            isEditingEndpoint = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
-                .buttonStyle(.bordered)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            } else {
+                // Display mode — plain Text views (no URL link detection)
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("URL")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Text(webhookURL.isEmpty ? "Not configured" : webhookURL)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(webhookURL.isEmpty ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        copyButton(webhookURL, field: "URL")
+                    }
+                    HStack {
+                        Text("Token")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Text(webhookToken.isEmpty ? "Not set" : webhookToken)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(webhookToken.isEmpty ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        copyButton(webhookToken, field: "Token")
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Edit") { isEditingEndpoint = true }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Check an accessory or scene below to send a webhook when it changes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                (Text("By default, events are batched with the next heartbeat. Tap ")
+                    + Text(Image(systemName: "bolt.fill")).foregroundColor(.orange)
+                    + Text(" to deliver immediately."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("[OpenClaw webhook docs](https://docs.openclaw.ai/automation/webhook)")
+                    .font(.caption)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.bottom, 6)
 
             Divider()
 
@@ -651,7 +788,13 @@ private struct WebhookSettingsView: View {
                         Section {
                             ForEach(filteredScenes) { scene in
                                 Toggle(isOn: sceneBinding(scene.id, name: scene.name)) {
-                                    Label(scene.name, systemImage: "star.fill")
+                                    HStack(spacing: 6) {
+                                        Label(scene.name, systemImage: "star.fill")
+                                        Spacer()
+                                        if enabledSceneIDs.contains(scene.id) {
+                                            wakeModeButton(itemID: scene.id, findTrigger: { $0.sceneID == scene.id })
+                                        }
+                                    }
                                 }
                             }
                         } header: {
@@ -678,6 +821,9 @@ private struct WebhookSettingsView: View {
                                     HStack {
                                         Text(item.name)
                                         Spacer()
+                                        if enabledAccessoryIDs.contains(item.id) {
+                                            wakeModeButton(itemID: item.id, findTrigger: { $0.accessoryID == item.id })
+                                        }
                                         Text(item.category)
                                             .foregroundStyle(.secondary)
                                             .font(.caption)
@@ -716,7 +862,77 @@ private struct WebhookSettingsView: View {
                 .padding(.vertical, 6)
             }
         }
-        .task { await loadSettings() }
+        .task {
+            await loadSettings()
+            loadCircuitState()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .webhookCircuitStateDidChange)
+        ) { notification in
+            if let state = notification.userInfo?["state"] as? String {
+                circuitState = state
+            }
+            if let count = notification.userInfo?["softTripCount"] as? Int {
+                circuitSoftTripCount = count
+            }
+            if let remaining = notification.userInfo?["remainingSeconds"] as? Int {
+                circuitRemainingSeconds = remaining
+            }
+            if let dropped = notification.userInfo?["totalDropped"] as? Int {
+                circuitTotalDropped = dropped
+            }
+            updateCountdownTimer()
+        }
+    }
+
+    // MARK: - Circuit Breaker
+
+    private func loadCircuitState() {
+        let cb = WebhookCircuitBreaker.shared
+        circuitState = cb.state.rawValue
+        circuitSoftTripCount = cb.softTripCount
+        circuitRemainingSeconds = cb.remainingCooldownSeconds
+        circuitTotalDropped = cb.totalDroppedCount
+        updateCountdownTimer()
+    }
+
+    private func updateCountdownTimer() {
+        countdownTask?.cancel()
+        guard circuitState == "softOpen" else { return }
+        countdownTask = Task { @MainActor in
+            while !Task.isCancelled && circuitState == "softOpen" {
+                circuitRemainingSeconds = WebhookCircuitBreaker.shared.remainingCooldownSeconds
+                if circuitRemainingSeconds <= 0 { break }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    // MARK: - Wake Mode Toggle
+
+    /// Compact bolt icon that toggles between batched (default) and immediate delivery.
+    /// Only visible when set to immediate — batched is the default and needs no indicator.
+    /// Tap the bolt to revert to batched; tap empty space to make it immediate.
+    @ViewBuilder
+    private func wakeModeButton(
+        itemID: String,
+        findTrigger: @escaping (HomeClawConfig.WebhookTrigger) -> Bool
+    ) -> some View {
+        let isImmediate = wakeModes[itemID] == "now"
+        Button {
+            let newMode = isImmediate ? "next-heartbeat" : "now"
+            wakeModes[itemID] = newMode
+            if var trigger = HomeClawConfig.shared.webhookTriggers.first(where: findTrigger) {
+                trigger.wakeMode = newMode == "next-heartbeat" ? nil : newMode
+                HomeClawConfig.shared.updateWebhookTrigger(trigger)
+            }
+        } label: {
+            Image(systemName: "bolt.fill")
+                .font(.body)
+                .foregroundStyle(isImmediate ? .orange : Color.secondary.opacity(0.3))
+        }
+        .buttonStyle(.plain)
+        .help(isImmediate ? "Immediate delivery (tap to batch)" : "Batched delivery (tap for immediate)")
     }
 
     // MARK: - Bindings
@@ -819,6 +1035,17 @@ private struct WebhookSettingsView: View {
         enabledSceneIDs = Set(triggers.compactMap(\.sceneID).filter { !$0.isEmpty })
         enabledAccessoryIDs = Set(triggers.compactMap(\.accessoryID).filter { !$0.isEmpty })
 
+        // Load per-trigger wake modes keyed by scene/accessory ID
+        for trigger in triggers {
+            let mode = trigger.wakeMode ?? "next-heartbeat"
+            if let sceneID = trigger.sceneID, !sceneID.isEmpty {
+                wakeModes[sceneID] = mode
+            }
+            if let accID = trigger.accessoryID, !accID.isEmpty {
+                wakeModes[accID] = mode
+            }
+        }
+
         let hk = HomeKitManager.shared
 
         // Load scenes with home name
@@ -833,7 +1060,7 @@ private struct WebhookSettingsView: View {
         let accList = await hk.listAllAccessories()
         allAccessories = accList.map { AccessoryItem(
             id: $0["id"] as? String ?? UUID().uuidString,
-            name: $0["name"] as? String ?? "Unknown",
+            name: $0["home_display_name"] as? String ?? $0["name"] as? String ?? "Unknown",
             category: $0["category"] as? String ?? "Other",
             room: $0["room"] as? String ?? "",
             homeName: $0["home_name"] as? String ?? ""
@@ -841,6 +1068,28 @@ private struct WebhookSettingsView: View {
 
         if selectedHome.isEmpty, let firstName = homeNames.first {
             selectedHome = firstName
+        }
+    }
+
+    @ViewBuilder
+    private func copyButton(_ text: String, field: String) -> some View {
+        if !text.isEmpty {
+            Button {
+                #if targetEnvironment(macCatalyst)
+                UIPasteboard.general.string = text
+                #endif
+                copiedField = field
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    if copiedField == field { copiedField = nil }
+                }
+            } label: {
+                Image(systemName: copiedField == field ? "checkmark" : "doc.on.doc")
+                    .font(.caption)
+                    .foregroundStyle(copiedField == field ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Copy \(field.lowercased())")
         }
     }
 

@@ -116,15 +116,27 @@ final class SocketServer: @unchecked Sendable {
         var bufSize: Int32 = 1_048_576
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
 
-        // Read request (up to 64KB)
+        // Read request — loop until newline delimiter or 1MB cap.
+        // A single recv() may not return the full payload for large requests
+        // (e.g., import-scene with many actions).
+        let maxRequestSize = 1_048_576 // 1 MB safety cap
+        var requestData = Data()
         var buffer = [UInt8](repeating: 0, count: 65536)
-        let bytesRead = recv(fd, &buffer, buffer.count, 0)
-        guard bytesRead > 0 else {
+
+        while requestData.count < maxRequestSize {
+            let bytesRead = recv(fd, &buffer, buffer.count, 0)
+            if bytesRead <= 0 { break }
+            // Check the fresh chunk for the newline delimiter before appending,
+            // avoiding an O(n²) rescan of the full accumulated buffer.
+            let hasNewline = buffer[..<bytesRead].contains(UInt8(ascii: "\n"))
+            requestData.append(contentsOf: buffer[..<bytesRead])
+            if hasNewline { break }
+        }
+
+        guard !requestData.isEmpty else {
             close(fd)
             return
         }
-
-        let requestData = Data(buffer[..<bytesRead])
 
         // Find newline-delimited request
         let lineData: Data
@@ -174,11 +186,28 @@ final class SocketServer: @unchecked Sendable {
                     "is_stale": CharacteristicCache.shared.isStale,
                     "last_warmed": CharacteristicCache.shared.lastWarmedString as Any,
                 ]
+                let formatter = ISO8601DateFormatter()
+                let cb = WebhookCircuitBreaker.shared
+                let webhookConfig = HomeClawConfig.shared.webhookConfig
+                var webhookInfo: [String: Any] = [
+                    "enabled": webhookConfig?.enabled ?? false,
+                    "url_configured": !(webhookConfig?.url.isEmpty ?? true),
+                    "circuit_state": cb.state.rawValue,
+                ]
+                if cb.state != .closed {
+                    webhookInfo["soft_trip_count"] = cb.softTripCount
+                    webhookInfo["remaining_seconds"] = cb.remainingCooldownSeconds
+                    webhookInfo["total_dropped"] = cb.totalDroppedCount
+                }
+                if let d = cb.lastSuccessDate { webhookInfo["last_success"] = formatter.string(from: d) }
+                if let d = cb.lastFailureDate { webhookInfo["last_failure"] = formatter.string(from: d) }
+
                 result = [
                     "ready": hk.isReady,
                     "homes": hk.homes.count,
                     "accessories": hk.totalAccessoryCount,
                     "cache": cacheInfo,
+                    "webhook": webhookInfo,
                 ] as [String: Any]
 
             case "list_homes":
@@ -309,15 +338,22 @@ final class SocketServer: @unchecked Sendable {
                 ] as [String: Any]
 
             case "set_webhook":
+                // Merge provided fields into existing config (PATCH, not PUT).
+                // Missing fields retain their current values.
+                let existing = HomeClawConfig.shared.webhookConfig
                 let enabled = (args["enabled"] as? Bool)
                     ?? (args["enabled"] as? String).map { $0 == "true" }
-                    ?? false
-                let url = args["url"] as? String ?? ""
-                let token = args["token"] as? String ?? ""
-                let events = args["events"] as? [String]
+                    ?? existing?.enabled ?? false
+                let url = (args["url"] as? String) ?? existing?.url ?? ""
+                let token = (args["token"] as? String) ?? existing?.token ?? ""
+                let events = (args["events"] as? [String]) ?? existing?.events
                 HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                     enabled: enabled, url: url, token: token, events: events
                 )
+                // Reset circuit breaker when re-enabling webhook
+                if enabled && WebhookCircuitBreaker.shared.state == .hardOpen {
+                    WebhookCircuitBreaker.shared.manualReset()
+                }
                 result = HomeClawConfig.shared.toDict()
 
             case "event_log_stats":
@@ -360,6 +396,13 @@ final class SocketServer: @unchecked Sendable {
                 trigger.characteristic = args["characteristic"] as? String
                 trigger.value = args["value"] as? String
                 trigger.message = args["message"] as? String
+                trigger.action = args["action"] as? String
+                trigger.wakeMode = args["wake_mode"] as? String
+                trigger.agentPrompt = args["agent_prompt"] as? String
+                trigger.agentId = args["agent_id"] as? String
+                trigger.agentName = args["agent_name"] as? String
+                trigger.agentDeliver = args["agent_deliver"] as? Bool
+                    ?? (args["agent_deliver"] as? String).map { $0 == "true" }
                 HomeClawConfig.shared.addWebhookTrigger(trigger)
                 result = triggerToDict(trigger)
 
@@ -370,6 +413,68 @@ final class SocketServer: @unchecked Sendable {
                 HomeClawConfig.shared.removeWebhookTrigger(id: id)
                 let triggers = HomeClawConfig.shared.webhookTriggers
                 result = ["triggers": triggers.map { triggerToDict($0) }] as [String: Any]
+
+            case "update_trigger":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                guard var trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.id == id }) else {
+                    return encodeResponse(success: false, error: "Trigger not found: \(id)")
+                }
+                if let v = args["label"] as? String { trigger.label = v }
+                if let v = args["enabled"] as? Bool { trigger.enabled = v }
+                else if let v = (args["enabled"] as? String).map({ $0 == "true" }) { trigger.enabled = v }
+                if let v = args["accessory_id"] as? String { trigger.accessoryID = v.isEmpty ? nil : v }
+                if let v = args["scene_name"] as? String { trigger.sceneName = v.isEmpty ? nil : v }
+                if let v = args["scene_id"] as? String { trigger.sceneID = v.isEmpty ? nil : v }
+                if let v = args["characteristic"] as? String { trigger.characteristic = v.isEmpty ? nil : v }
+                if let v = args["value"] as? String { trigger.value = v.isEmpty ? nil : v }
+                if let v = args["message"] as? String { trigger.message = v.isEmpty ? nil : v }
+                if let v = args["action"] as? String { trigger.action = v.isEmpty ? nil : v }
+                if let v = args["wake_mode"] as? String { trigger.wakeMode = v.isEmpty ? nil : v }
+                if let v = args["agent_prompt"] as? String { trigger.agentPrompt = v.isEmpty ? nil : v }
+                if let v = args["agent_id"] as? String { trigger.agentId = v.isEmpty ? nil : v }
+                if let v = args["agent_name"] as? String { trigger.agentName = v.isEmpty ? nil : v }
+                if let v = args["agent_deliver"] as? Bool { trigger.agentDeliver = v }
+                else if let v = args["agent_deliver"] as? String { trigger.agentDeliver = v == "true" }
+                HomeClawConfig.shared.updateWebhookTrigger(trigger)
+                result = triggerToDict(trigger)
+
+            case "delete_scene":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                result = try await hk.deleteScene(name: name, homeName: args["home"] as? String)
+
+            case "assign_rooms":
+                guard let assignments = args["assignments"] as? [[String: String]] else {
+                    return encodeResponse(success: false, error: "Missing 'assignments' array")
+                }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.assignRooms(
+                    homeName: args["home"] as? String,
+                    assignments: assignments,
+                    dryRun: dryRun
+                )
+
+            case "import_scene":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                guard let actions = args["actions"] as? [[String: String]] else {
+                    return encodeResponse(success: false, error: "Missing 'actions' array")
+                }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.importScene(
+                    name: name,
+                    homeName: args["home"] as? String,
+                    actions: actions,
+                    dryRun: dryRun
+                )
 
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
@@ -396,6 +501,12 @@ final class SocketServer: @unchecked Sendable {
         if let v = t.characteristic { dict["characteristic"] = v }
         if let v = t.value { dict["value"] = v }
         if let v = t.message { dict["message"] = v }
+        if let v = t.action { dict["action"] = v }
+        if let v = t.wakeMode { dict["wake_mode"] = v }
+        if let v = t.agentPrompt { dict["agent_prompt"] = v }
+        if let v = t.agentId { dict["agent_id"] = v }
+        if let v = t.agentName { dict["agent_name"] = v }
+        if let v = t.agentDeliver { dict["agent_deliver"] = v }
         return dict
     }
 
